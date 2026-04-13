@@ -81,8 +81,8 @@ const Transactions = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchAccounts(); }, []);
-  useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]);
+  useEffect(() => { fetchAccounts(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleModal = () => {
     setModal(!modal);

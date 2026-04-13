@@ -67,7 +67,7 @@ const Accounts = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchAccounts(); }, []);
+  useEffect(() => { fetchAccounts(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleModal = () => {
     setModal(!modal);

@@ -4,18 +4,12 @@ import { useNavigate } from "react-router-dom";
 const Navdata = () => {
     const history = useNavigate();
 
-    const [isOverview, setIsOverview] = useState(false);
-    const [isAccounts, setIsAccounts] = useState(false);
     const [isLoans, setIsLoans] = useState(false);
-    const [isCreditCards, setIsCreditCards] = useState(false);
     const [iscurrentState, setIscurrentState] = useState('Dashboard');
 
     useEffect(() => {
-        if (iscurrentState !== 'Overview') setIsOverview(false);
-        if (iscurrentState !== 'Accounts') setIsAccounts(false);
-        if (iscurrentState !== 'Loans') setIsLoans(false);
-        if (iscurrentState !== 'CreditCards') setIsCreditCards(false);
-    }, [iscurrentState]);
+    if (iscurrentState !== 'Loans') setIsLoans(false);
+}, [iscurrentState]);
 
     const menuItems: any = [
         {
