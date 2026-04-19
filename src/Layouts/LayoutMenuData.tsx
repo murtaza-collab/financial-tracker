@@ -161,6 +161,28 @@ const Navdata = () => {
             },
         },
         {
+    id: "emis",
+    label: "EMI Tracker",
+    icon: "bx bx-calendar-check",
+    link: "/emis",
+    click: function (e: any) {
+        e.preventDefault();
+        history("/emis");
+        setIscurrentState('EMIs');
+    },
+},
+{
+    id: "goals",
+    label: "Savings Goals",
+    icon: "bx bx-target-lock",
+    link: "/goals",
+    click: function (e: any) {
+        e.preventDefault();
+        history("/goals");
+        setIscurrentState('Goals');
+    },
+},
+        {
             id: "profile",
             label: "Profile",
             icon: "bx bx-user",

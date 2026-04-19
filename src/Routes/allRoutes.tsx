@@ -250,6 +250,8 @@ import SlopeCharts from "pages/Charts/ApexCharts/SlopeCharts";
 import DashboardBlog from "pages/DashboardBlog";
 import Splits from "../pages/Splits";
 import Loans from "../pages/Loans";
+import EMIs from "../pages/EMIs";
+import Goals from "../pages/Goals";
 
 
 const authProtectedRoutes = [
@@ -463,6 +465,8 @@ const authProtectedRoutes = [
   { path: "/splits", component: <Splits /> },
   { path: "/loans-given", component: <Loans /> },
   { path: "/loans-taken", component: <Loans /> },
+  { path: "/emis", component: <EMIs /> },
+  { path: "/goals", component: <Goals /> },
 
   //User Profile
   { path: "/profile", component: <UserProfile /> },
