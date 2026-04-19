@@ -235,6 +235,7 @@ import TermsCondition from '../pages/Pages/TermsCondition';
 // // User Profile
 import UserProfile from "../pages/Authentication/user-profile";
 import Accounts from "../pages/Accounts";
+import CreditCards from "../pages/CreditCards";
 
 import RangeArea from "../pages/Charts/ApexCharts/RangeAreaCharts/Index";
 import FunnelChart from "../pages/Charts/ApexCharts/FunnelCharts/Index";
@@ -247,6 +248,8 @@ import BlogGridView from "pages/Pages/Blogs/GridView";
 import PageBlogOverview from "pages/Pages/Blogs/Overview";
 import SlopeCharts from "pages/Charts/ApexCharts/SlopeCharts";
 import DashboardBlog from "pages/DashboardBlog";
+import Splits from "../pages/Splits";
+import Loans from "../pages/Loans";
 
 
 const authProtectedRoutes = [
@@ -455,8 +458,11 @@ const authProtectedRoutes = [
 
   // Finance Portal
   { path: "/accounts", component: <Accounts /> },
-  { path: "/accounts", component: <Accounts /> },
   { path: "/transactions", component: <FinanceTransactions /> },
+  { path: "/credit-cards", component: <CreditCards /> },
+  { path: "/splits", component: <Splits /> },
+  { path: "/loans-given", component: <Loans /> },
+  { path: "/loans-taken", component: <Loans /> },
 
   //User Profile
   { path: "/profile", component: <UserProfile /> },

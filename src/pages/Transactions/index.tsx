@@ -19,7 +19,6 @@ const TRANSACTION_TYPES = [
   { value: 'income', label: 'Income' },
   { value: 'transfer', label: 'Transfer' },
   { value: 'atm_withdrawal', label: 'ATM Withdrawal' },
-  { value: 'credit_card_payment', label: 'Credit Card Payment' },
   { value: 'reimbursement_received', label: 'Reimbursement Received' },
   { value: 'loan_given', label: 'Loan Given' },
   { value: 'loan_received', label: 'Loan Received' },
@@ -54,6 +53,11 @@ const Transactions = () => {
   const [filterType, setFilterType] = useState('');
   const [filterAccount, setFilterAccount] = useState('');
 
+  // Split state
+  const [splitEnabled, setSplitEnabled] = useState(false);
+  const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
+  const [peopleList, setPeopleList] = useState<any[]>([]);
+
   document.title = 'Transactions | Finance Portal';
 
   const fetchAccounts = async () => {
@@ -64,6 +68,13 @@ const Transactions = () => {
       setAccounts(data);
       setCashAccounts(data.filter(a => a.type === 'cash' || a.type === 'custom_wallet'));
     }
+  };
+
+  const fetchPeople = async () => {
+    const { data } = await supabase
+      .from('split_people').select('*')
+      .eq('user_id', user?.id).order('name');
+    if (data) setPeopleList(data);
   };
 
   const fetchTransactions = async () => {
@@ -81,12 +92,18 @@ const Transactions = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchAccounts(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    fetchAccounts();
+    fetchPeople();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleModal = () => {
     setModal(!modal);
     setError('');
+    setSplitEnabled(false);
+    setSelectedPeople([]);
     validation.resetForm();
   };
 
@@ -105,7 +122,7 @@ useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslin
       type: Yup.string().required('Please select type'),
       account_id: Yup.string().required('Please select account'),
       to_account_id: Yup.string().when('type', {
-        is: (val: string) => ['transfer', 'credit_card_payment'].includes(val),
+        is: (val: string) => ['transfer'].includes(val),
         then: (s) => s.required('Please select destination account'),
         otherwise: (s) => s.nullable(),
       }),
@@ -117,8 +134,8 @@ useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslin
         const amount = Number(values.amount);
         const sourceAccount = accounts.find(a => a.id === values.account_id);
 
-        // Insert the transaction
-        const { error: txError } = await supabase.from('transactions').insert({
+        // Insert transaction
+        const { data: tx, error: txError } = await supabase.from('transactions').insert({
           user_id: user?.id,
           date: new Date(values.date).toISOString(),
           amount,
@@ -127,27 +144,51 @@ useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslin
           to_account_id: values.to_account_id || null,
           category: values.category || null,
           note: values.note || null,
-        });
+        }).select().single();
         if (txError) throw txError;
 
         // Update account balances
-        if (values.type === 'expense' || values.type === 'loan_given' || values.type === 'emi_payment' || values.type === 'goal_contribution') {
+        if (['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(values.type)) {
           await supabase.from('accounts').update({ balance: (sourceAccount!.balance - amount) }).eq('id', values.account_id);
-        }
-        else if (values.type === 'income' || values.type === 'reimbursement_received' || values.type === 'loan_received') {
+        } else if (['income', 'reimbursement_received', 'loan_received'].includes(values.type)) {
           await supabase.from('accounts').update({ balance: (sourceAccount!.balance + amount) }).eq('id', values.account_id);
-        }
-        else if (values.type === 'transfer' || values.type === 'credit_card_payment') {
+        } else if (values.type === 'transfer') {
           const destAccount = accounts.find(a => a.id === values.to_account_id);
           await supabase.from('accounts').update({ balance: (sourceAccount!.balance - amount) }).eq('id', values.account_id);
-          await supabase.from('accounts').update({ balance: (destAccount!.balance - amount) }).eq('id', values.to_account_id);
-        }
-        else if (values.type === 'atm_withdrawal') {
-          // Debit bank, credit cash wallet
+          await supabase.from('accounts').update({ balance: (destAccount!.balance + amount) }).eq('id', values.to_account_id);
+        } else if (values.type === 'atm_withdrawal') {
           await supabase.from('accounts').update({ balance: (sourceAccount!.balance - amount) }).eq('id', values.account_id);
           if (values.to_account_id) {
             const cashAccount = accounts.find(a => a.id === values.to_account_id);
             await supabase.from('accounts').update({ balance: (cashAccount!.balance + amount) }).eq('id', values.to_account_id);
+          }
+        }
+
+        // Handle split
+        if (splitEnabled && selectedPeople.length > 0 && values.type === 'expense') {
+          const totalPeople = selectedPeople.length + 1;
+          const perPersonShare = amount / totalPeople;
+
+          const { data: outing } = await supabase.from('outings').insert({
+            user_id: user?.id,
+            transaction_id: tx.id,
+            place_name: values.note || values.category || 'Outing',
+            date: new Date(values.date).toISOString().split('T')[0],
+            total_amount: amount,
+            paid_by: 'me',
+            total_people: totalPeople,
+            your_share: perPersonShare,
+            notes: values.note || null,
+          }).select().single();
+
+          if (outing) {
+            const participants = selectedPeople.map(personId => ({
+              outing_id: outing.id,
+              user_id: user?.id,
+              person_id: personId,
+              share_amount: perPersonShare,
+            }));
+            await supabase.from('outing_participants').insert(participants);
           }
         }
 
@@ -163,20 +204,18 @@ useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslin
   });
 
   const txType = validation.values.type;
-  const needsToAccount = ['transfer', 'credit_card_payment', 'atm_withdrawal'].includes(txType);
+  const needsToAccount = ['transfer', 'atm_withdrawal'].includes(txType);
   const toAccountLabel: Record<string, string> = {
     transfer: 'Transfer To',
-    credit_card_payment: 'Pay Credit Card',
     atm_withdrawal: 'Credit To Cash Wallet',
   };
-  const toAccountOptions = txType === 'credit_card_payment'
-    ? accounts.filter(a => a.type === 'credit_card')
-    : txType === 'atm_withdrawal'
+  const toAccountOptions = txType === 'atm_withdrawal'
     ? cashAccounts
     : accounts.filter(a => a.id !== validation.values.account_id);
 
   const totalIn = transactions.filter(t => ['income', 'reimbursement_received', 'loan_received'].includes(t.type)).reduce((s, t) => s + Number(t.amount), 0);
-  const totalOut = transactions.filter(t => ['expense', 'loan_given', 'emi_payment', 'credit_card_payment', 'atm_withdrawal', 'goal_contribution'].includes(t.type)).reduce((s, t) => s + Number(t.amount), 0);
+  const totalOut = transactions.filter(t => ['expense', 'loan_given', 'emi_payment', 'atm_withdrawal', 'goal_contribution'].includes(t.type)).reduce((s, t) => s + Number(t.amount), 0);
+
   return (
     <React.Fragment>
       <div className="page-content">
@@ -248,7 +287,7 @@ useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslin
               ) : transactions.length === 0 ? (
                 <div className="text-center py-5">
                   <i className="ri-exchange-line fs-1 text-muted"></i>
-                  <p className="text-muted mt-2">No transactions yet. Add your first transaction.</p>
+                  <p className="text-muted mt-2">No transactions yet.</p>
                   <Button color="success" onClick={toggleModal}>Add Transaction</Button>
                 </div>
               ) : (
@@ -270,7 +309,7 @@ useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslin
                         return (
                           <tr key={tx.id}>
                             <td>{new Date(tx.date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                            <td><Badge color={TYPE_COLORS[tx.type]} pill>{TRANSACTION_TYPES.find(t => t.value === tx.type)?.label}</Badge></td>
+                            <td><Badge color={TYPE_COLORS[tx.type]} pill>{TRANSACTION_TYPES.find(t => t.value === tx.type)?.label || tx.type}</Badge></td>
                             <td>{tx.accounts?.name || '—'}</td>
                             <td>{tx.category || '—'}</td>
                             <td className="text-muted">{tx.note || '—'}</td>
@@ -324,7 +363,7 @@ useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslin
             </FormGroup>
 
             <FormGroup>
-              <Label>{txType === 'atm_withdrawal' ? 'Debit From Bank' : txType === 'transfer' ? 'Transfer From' : txType === 'credit_card_payment' ? 'Pay From Account' : 'Account'} <span className="text-danger">*</span></Label>
+              <Label>Account <span className="text-danger">*</span></Label>
               <Input
                 type="select" name="account_id"
                 value={validation.values.account_id}
@@ -333,7 +372,7 @@ useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslin
               >
                 <option value="">Select account...</option>
                 {accounts
-                  .filter(a => txType === 'atm_withdrawal' ? ['bank_savings', 'bank_current'].includes(a.type) : txType === 'credit_card_payment' ? ['bank_savings', 'bank_current'].includes(a.type) : true)
+                  .filter(a => txType === 'atm_withdrawal' ? ['bank_savings', 'bank_current'].includes(a.type) : true)
                   .map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)
                 }
               </Input>
@@ -368,11 +407,83 @@ useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslin
               <Label>Note / Description</Label>
               <Input
                 type="textarea" name="note" rows={2}
-                placeholder="e.g. Groceries from Imtiaz, Fuel at PSO..."
+                placeholder="e.g. Cocochan, BBQ Tonight, Kolachi..."
                 value={validation.values.note}
                 onChange={validation.handleChange}
               />
             </FormGroup>
+
+            {/* Split Toggle — only for expenses */}
+            {txType === 'expense' && (
+              <div className="mt-2">
+                <div className="form-check form-switch mb-2">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="splitToggle"
+                    checked={splitEnabled}
+                    onChange={e => {
+                      setSplitEnabled(e.target.checked);
+                      setSelectedPeople([]);
+                    }}
+                  />
+                  <label className="form-check-label fw-semibold" htmlFor="splitToggle">
+                    Split this expense?
+                  </label>
+                </div>
+
+                {splitEnabled && (
+                  <div className="border rounded p-3 bg-light">
+                    <Label className="mb-2 fs-12">Who was there? (tap to select)</Label>
+                    {peopleList.length === 0 ? (
+                      <p className="text-muted fs-12 mb-0">
+                        No contacts yet. <a href="/splits">Add people in Splits page</a> first.
+                      </p>
+                    ) : (
+                      <>
+                        <div className="d-flex flex-wrap gap-2 mb-3">
+                          {peopleList.map(person => (
+                            <span
+                              key={person.id}
+                              onClick={() => setSelectedPeople(prev =>
+                                prev.includes(person.id)
+                                  ? prev.filter(id => id !== person.id)
+                                  : [...prev, person.id]
+                              )}
+                              className={`badge px-3 py-2 fs-12 ${selectedPeople.includes(person.id) ? 'bg-success' : 'bg-secondary'}`}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              {selectedPeople.includes(person.id) ? '✓ ' : ''}{person.name}
+                            </span>
+                          ))}
+                        </div>
+
+                        {selectedPeople.length > 0 && validation.values.amount && (
+                          <div className="bg-white rounded p-2 border">
+                            <div className="d-flex justify-content-between">
+                              <small className="text-muted">Total people (incl. you)</small>
+                              <small className="fw-semibold">{selectedPeople.length + 1}</small>
+                            </div>
+                            <div className="d-flex justify-content-between">
+                              <small className="text-muted">Per person share</small>
+                              <small className="fw-semibold text-primary">
+                                {formatCurrency(Number(validation.values.amount) / (selectedPeople.length + 1))}
+                              </small>
+                            </div>
+                            <div className="d-flex justify-content-between">
+                              <small className="text-muted">To recover from others</small>
+                              <small className="fw-semibold text-warning">
+                                {formatCurrency(Number(validation.values.amount) - (Number(validation.values.amount) / (selectedPeople.length + 1)))}
+                              </small>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </Form>
         </ModalBody>
         <ModalFooter>

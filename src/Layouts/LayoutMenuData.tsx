@@ -76,21 +76,16 @@ const Navdata = () => {
             },
         },
         {
-            id: "loans",
-            label: "Loans",
-            icon: "bx bx-money",
-            link: "/#",
-            stateVariables: isLoans,
-            click: function (e: any) {
+           id: "loans",
+           label: "Loans",
+           icon: "bx bx-money",
+           link: "/loans-given",
+           click: function (e: any) {
                 e.preventDefault();
-                setIsLoans(!isLoans);
+                history("/loans-given");
                 setIscurrentState('Loans');
-            },
-            subItems: [
-                { id: "loans-given", label: "Money to Receive", link: "/loans-given", parentId: "loans" },
-                { id: "loans-taken", label: "Money to Pay Back", link: "/loans-taken", parentId: "loans" },
-            ],
-        },
+    },
+},
         {
             id: "emis",
             label: "EMI Tracker",
