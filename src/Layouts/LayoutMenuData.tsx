@@ -109,10 +109,6 @@ const Navdata = () => {
             },
         },
         {
-            label: "Plan",
-            isHeader: true,
-        },
-        {
             id: "budget",
             label: "Budget",
             icon: "bx bx-pie-chart-alt",

@@ -252,6 +252,8 @@ import Splits from "../pages/Splits";
 import Loans from "../pages/Loans";
 import EMIs from "../pages/EMIs";
 import Goals from "../pages/Goals";
+import Budget from "../pages/Budget";
+import Forecast from "../pages/Forecast";
 
 
 const authProtectedRoutes = [
@@ -467,6 +469,8 @@ const authProtectedRoutes = [
   { path: "/loans-taken", component: <Loans /> },
   { path: "/emis", component: <EMIs /> },
   { path: "/goals", component: <Goals /> },
+  { path: "/budget", component: <Budget /> },
+  { path: "/forecast", component: <Forecast /> },
 
   //User Profile
   { path: "/profile", component: <UserProfile /> },
