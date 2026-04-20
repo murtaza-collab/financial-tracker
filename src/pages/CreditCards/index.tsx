@@ -86,35 +86,41 @@ const CreditCards = () => {
       .in('type', ['bank_savings', 'bank_current']);
 
     if (cardData) {
-      setCards(cardData);
-      // Auto-create bill record for each card in selected month if not exists
-      for (const card of cardData) {
-        const { data: existing } = await supabase
-          .from('bills').select('id')
-          .eq('account_id', card.id).eq('month', selectedMonth).single();
+  setCards(cardData);
 
-        if (!existing) {
-          const [year, month] = selectedMonth.split('-').map(Number);
-          const billingDateObj = new Date(year, month - 1, card.billing_date);
-          const dueDay = card.due_date;
-          const dueMonth = dueDay < card.billing_date ? month : month - 1;
-          const dueDateObj = new Date(year, dueMonth, dueDay);
+  // Only auto-create bill for current month — never for past months
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  
+  if (selectedMonth === currentMonthKey) {
+    for (const card of cardData) {
+      const { data: existing } = await supabase
+        .from('bills').select('id')
+        .eq('account_id', card.id).eq('month', selectedMonth).single();
 
-          await supabase.from('bills').insert({
-            user_id: user?.id,
-            account_id: card.id,
-            month: selectedMonth,
-            billing_date: billingDateObj.toISOString().split('T')[0],
-            due_date: dueDateObj.toISOString().split('T')[0],
-            status: 'pending',
-            total_amount: 0,
-            statement_amount: null,
-            minimum_due: null,
-            total_paid: 0,
-          });
-        }
+      if (!existing) {
+        const [year, month] = selectedMonth.split('-').map(Number);
+        const billingDateObj = new Date(year, month - 1, card.billing_date);
+        const dueDay = card.due_date;
+        const dueMonth = dueDay < card.billing_date ? month : month - 1;
+        const dueDateObj = new Date(year, dueMonth, dueDay);
+
+        await supabase.from('bills').insert({
+          user_id: user?.id,
+          account_id: card.id,
+          month: selectedMonth,
+          billing_date: billingDateObj.toISOString().split('T')[0],
+          due_date: dueDateObj.toISOString().split('T')[0],
+          status: 'pending',
+          total_amount: 0,
+          statement_amount: null,
+          minimum_due: null,
+          total_paid: 0,
+        });
       }
     }
+  }
+}
 
     const { data: billData } = await supabase
       .from('bills').select('*')
