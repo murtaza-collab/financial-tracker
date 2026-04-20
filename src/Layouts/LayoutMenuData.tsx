@@ -98,6 +98,17 @@ const Navdata = () => {
             },
         },
         {
+    id: "recurring",
+    label: "Recurring",
+    icon: "bx bx-repeat",
+    link: "/recurring",
+    click: function (e: any) {
+        e.preventDefault();
+        history("/recurring");
+        setIscurrentState('Recurring');
+    },
+},
+        {
             id: "goals",
             label: "Savings Goals",
             icon: "bx bx-target-lock",
@@ -157,27 +168,17 @@ const Navdata = () => {
             },
         },
         {
-    id: "emis",
-    label: "EMI Tracker",
-    icon: "bx bx-calendar-check",
-    link: "/emis",
+    id: "categories",
+    label: "Custom Categories",
+    icon: "bx bx-category",
+    link: "/settings/categories",
     click: function (e: any) {
         e.preventDefault();
-        history("/emis");
-        setIscurrentState('EMIs');
+        history("/settings/categories");
+        setIscurrentState('Categories');
     },
 },
-{
-    id: "goals",
-    label: "Savings Goals",
-    icon: "bx bx-target-lock",
-    link: "/goals",
-    click: function (e: any) {
-        e.preventDefault();
-        history("/goals");
-        setIscurrentState('Goals');
-    },
-},
+
         {
             id: "profile",
             label: "Profile",

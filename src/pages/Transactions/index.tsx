@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
+import { useCategories } from '../../hooks/useCategories';
 
 interface Account { id: string; name: string; type: string; balance: number; }
 interface Transaction {
@@ -24,14 +25,6 @@ const TRANSACTION_TYPES = [
   { value: 'loan_received', label: 'Loan Received' },
   { value: 'emi_payment', label: 'EMI Payment' },
   { value: 'goal_contribution', label: 'Goal Contribution' },
-];
-
-const CATEGORIES = [
-  'Grocery', 'Restaurant & Food', 'Fuel', 'Utility Bills',
-  'Mobile & Internet', 'Medical', 'Transport', 'Shopping',
-  'Education', 'Rent', 'Salary', 'Freelance Income',
-  'Business Income', 'Reimbursement', 'Family',
-  'Entertainment', 'Travel', 'Office Expense', 'Other',
 ];
 
 const TYPE_COLORS: Record<string, string> = {
@@ -58,7 +51,14 @@ const Transactions = () => {
   const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
   const [peopleList, setPeopleList] = useState<any[]>([]);
 
+  // Recurring state
+const [recurringEnabled, setRecurringEnabled] = useState(false);
+const [recurringFrequency, setRecurringFrequency] = useState('monthly');
+const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOString().split('T')[0]);
+
   document.title = 'Transactions | Finance Portal';
+
+  const categories = useCategories(user?.id);
 
   const fetchAccounts = async () => {
     const { data } = await supabase
@@ -100,12 +100,15 @@ const Transactions = () => {
   useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleModal = () => {
-    setModal(!modal);
-    setError('');
-    setSplitEnabled(false);
-    setSelectedPeople([]);
-    validation.resetForm();
-  };
+  setModal(!modal);
+  setError('');
+  setSplitEnabled(false);
+  setSelectedPeople([]);
+  setRecurringEnabled(false);
+  setRecurringFrequency('monthly');
+  setRecurringStartDate(new Date().toISOString().split('T')[0]);
+  validation.resetForm();
+};
 
   const validation = useFormik({
     initialValues: {
@@ -180,6 +183,26 @@ const Transactions = () => {
             your_share: perPersonShare,
             notes: values.note || null,
           }).select().single();
+
+          // Handle recurring
+if (recurringEnabled) {
+  const intervalDays = recurringFrequency === 'daily' ? 1
+    : recurringFrequency === 'weekly' ? 7 : 30;
+
+  await supabase.from('recurring_rules').insert({
+    user_id: user?.id,
+    name: values.note || values.category || 'Recurring Transaction',
+    amount,
+    type: values.type,
+    account_id: values.account_id,
+    category: values.category || null,
+    note: values.note || null,
+    frequency: recurringFrequency,
+    interval_days: intervalDays,
+    next_date: recurringStartDate,
+    is_active: true,
+  });
+}
 
           if (outing) {
             const participants = selectedPeople.map(personId => ({
@@ -396,12 +419,12 @@ const Transactions = () => {
             )}
 
             <FormGroup>
-              <Label>Category</Label>
-              <Input type="select" name="category" value={validation.values.category} onChange={validation.handleChange}>
-                <option value="">Select category...</option>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </Input>
-            </FormGroup>
+  <Label>Category</Label>
+  <Input type="select" name="category" value={validation.values.category} onChange={validation.handleChange}>
+    <option value="">Select category...</option>
+    {categories.map((c: string) => <option key={c} value={c}>{c}</option>)}
+  </Input>
+</FormGroup>
 
             <FormGroup>
               <Label>Note / Description</Label>
@@ -484,6 +507,44 @@ const Transactions = () => {
                 )}
               </div>
             )}
+            {/* Recurring Toggle */}
+<div className="mt-2">
+  <div className="form-check form-switch mb-2">
+    <input
+      className="form-check-input"
+      type="checkbox"
+      id="recurringToggle"
+      checked={recurringEnabled}
+      onChange={e => setRecurringEnabled(e.target.checked)}
+    />
+    <label className="form-check-label fw-semibold" htmlFor="recurringToggle">
+      Make this recurring?
+    </label>
+  </div>
+  {recurringEnabled && (
+    <div className="border rounded p-3 bg-light">
+      <Row>
+        <Col md={6}>
+          <FormGroup className="mb-2">
+            <Label className="fs-12">Frequency</Label>
+            <Input type="select" value={recurringFrequency} onChange={e => setRecurringFrequency(e.target.value)}>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </Input>
+          </FormGroup>
+        </Col>
+        <Col md={6}>
+          <FormGroup className="mb-2">
+            <Label className="fs-12">Next Due Date</Label>
+            <Input type="date" value={recurringStartDate} onChange={e => setRecurringStartDate(e.target.value)} />
+          </FormGroup>
+        </Col>
+      </Row>
+      <small className="text-muted">This will appear in Recurring page for confirmation each cycle.</small>
+    </div>
+  )}
+</div>
           </Form>
         </ModalBody>
         <ModalFooter>
