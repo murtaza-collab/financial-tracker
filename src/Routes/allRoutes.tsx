@@ -47,6 +47,7 @@ const Offlinepage = lazy(() => import("../pages/AuthenticationInner/Errors/Offli
 const Maintenance = lazy(() => import('../pages/Pages/Maintenance/Maintenance'));
 const ComingSoon = lazy(() => import('../pages/Pages/ComingSoon/ComingSoon'));
 const Recurring = lazy(() => import("../pages/Recurring"));
+const FinancialCalendar = lazy(() => import("../pages/FinancialCalendar"));
 
 
 const authProtectedRoutes = [
@@ -67,6 +68,7 @@ const authProtectedRoutes = [
   { path: "/settings/categories", component: <Categories /> },
   { path: "/profile", component: <UserProfile /> },
   { path: "/recurring", component: <Recurring /> },
+  { path: "/financial-calendar", component: <FinancialCalendar /> },
 
   {
     path: "/",
