@@ -1,10 +1,6 @@
 import React, { useEffect } from "react";
 import { Link } from "react-router-dom";
 import SimpleBar from "simplebar-react";
-//import logo
-import logoSm from "../assets/images/logo-sm.png";
-import logoDark from "../assets/images/logo-dark.png";
-import logoLight from "../assets/images/logo-light.png";
 
 //Import Components
 import VerticalLayout from "./VerticalLayouts";
@@ -39,22 +35,25 @@ const Sidebar = ({ layoutType } : any) => {
       <div className="app-menu navbar-menu">
         <div className="navbar-brand-box">
           <Link to="/" className="logo logo-dark">
-            <span className="logo-sm">
-              <img src={logoSm} alt="" height="22" />
-            </span>
-            <span className="logo-lg">
-              <img src={logoDark} alt="" height="17" />
-            </span>
-          </Link>
-
-          <Link to="/" className="logo logo-light">
-            <span className="logo-sm">
-              <img src={logoSm} alt="" height="22" />
-            </span>
-            <span className="logo-lg">
-              <img src={logoLight} alt="" height="17" />
-            </span>
-          </Link>
+  <span className="logo-sm">
+    <i className="bx bx-wallet" style={{ fontSize: 22, color: '#405189' }}></i>
+  </span>
+  <span className="logo-lg">
+    <span style={{ fontSize: 18, fontWeight: 700, color: '#405189', letterSpacing: 1 }}>
+      <i className="bx bx-wallet me-1"></i>Finance Portal
+    </span>
+  </span>
+</Link>
+<Link to="/" className="logo logo-light">
+  <span className="logo-sm">
+    <i className="bx bx-wallet" style={{ fontSize: 22, color: '#fff' }}></i>
+  </span>
+  <span className="logo-lg">
+    <span style={{ fontSize: 18, fontWeight: 700, color: '#fff', letterSpacing: 1 }}>
+      <i className="bx bx-wallet me-1"></i>Finance Portal
+    </span>
+  </span>
+</Link>
           <button
             onClick={addEventListenerOnSmHoverMenu}
             type="button"

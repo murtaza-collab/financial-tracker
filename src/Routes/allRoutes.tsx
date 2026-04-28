@@ -6,6 +6,7 @@ import Login from "../pages/Authentication/Login";
 import Register from "../pages/Authentication/Register";
 import Logout from "../pages/Authentication/Logout";
 import ForgetPasswordPage from "../pages/Authentication/ForgetPassword";
+import ResetPassword from "../pages/Authentication/ResetPassword";
 
 // Finance Portal — lazy loaded
 const Dashboard = lazy(() => import("../pages/DashboardEcommerce"));
@@ -46,6 +47,7 @@ const Offlinepage = lazy(() => import("../pages/AuthenticationInner/Errors/Offli
 const Maintenance = lazy(() => import('../pages/Pages/Maintenance/Maintenance'));
 const ComingSoon = lazy(() => import('../pages/Pages/ComingSoon/ComingSoon'));
 const Recurring = lazy(() => import("../pages/Recurring"));
+
 
 const authProtectedRoutes = [
   { path: "/dashboard", component: <Dashboard /> },
@@ -103,6 +105,7 @@ const publicRoutes = [
   { path: "/auth-offline", component: <Offlinepage /> },
   { path: "/pages-maintenance", component: <Maintenance /> },
   { path: "/pages-coming-soon", component: <ComingSoon /> },
+  { path: "/reset-password", component: <ResetPassword /> },
 ];
 
 export { authProtectedRoutes, publicRoutes };

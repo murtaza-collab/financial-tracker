@@ -1,171 +1,241 @@
-import React, { useState, useEffect } from "react";
-import { isEmpty } from "lodash";
-
-import {
-  Container,
-  Row,
-  Col,
-  Card,
-  Alert,
-  CardBody,
-  Button,
-  Label,
-  Input,
-  FormFeedback,
-  Form,
-} from "reactstrap";
-
-// Formik Validation
-import * as Yup from "yup";
-import { useFormik } from "formik";
-
-//redux
-import { useSelector, useDispatch } from "react-redux";
-
-import avatar from "../../assets/images/users/avatar-1.jpg";
-// actions
-import { editProfile, resetProfileFlag } from "../../slices/thunks";
-import { createSelector } from "reselect";
+import React, { useEffect, useState } from 'react';
+import { Container, Row, Col, Card, CardBody, CardHeader, Button, Form, FormGroup, Label, Input, Alert, Spinner } from 'reactstrap';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
+import BreadCrumb from '../../Components/Common/BreadCrumb';
 
 const UserProfile = () => {
-  const dispatch : any = useDispatch();
+  const { user, signOut } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [error, setError] = useState('');
 
-  const [email, setemail] = useState("admin@gmail.com");
-  const [idx, setidx] = useState("1");
+  // Profile fields
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
 
-  const [userName, setUserName] = useState("Admin");
+  // Password fields
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState('');
 
-
-
-  const selectLayoutState = (state : any) => state.Profile;
-  const userprofileData = createSelector(
-    selectLayoutState,
-    (state) => ({
-      user: state.user,
-      success: state.success,
-      error: state.error
-    })
-  );
-  // Inside your component
-  const {
-    user, success, error 
-  } = useSelector(userprofileData);
-
+  document.title = 'Profile | Finance Portal';
 
   useEffect(() => {
-    if (sessionStorage.getItem("authUser")) {
-      const storedUser = sessionStorage.getItem("authUser");
-      if (storedUser) {
-        const obj = JSON.parse(storedUser);
-
-        if (!isEmpty(user)) {
-          obj.data.first_name = user.first_name;
-          sessionStorage.removeItem("authUser");
-          sessionStorage.setItem("authUser", JSON.stringify(obj));
-        }
-
-        setUserName(obj.data.first_name);
-        setemail(obj.data.email);
-        setidx(obj.data._id || "1");
-
-        setTimeout(() => {
-          dispatch(resetProfileFlag());
-        }, 3000);
-      }
+    if (user) {
+      setEmail(user.email || '');
+      setName(user.user_metadata?.name || '');
+      fetchProfile();
     }
-  }, [dispatch, user]);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-
-
-  const validation = useFormik({
-    // enableReinitialize : use this flag when initial values needs to be changed
-    enableReinitialize: true,
-
-    initialValues: {
-      first_name: userName || 'Admin',
-      idx: idx || '',
-    },
-    validationSchema: Yup.object({
-      first_name: Yup.string().required("Please Enter Your UserName"),
-    }),
-    onSubmit: (values) => {
-      dispatch(editProfile(values));
+  const fetchProfile = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('profiles')
+      .select('name, email')
+      .eq('id', user?.id)
+      .single();
+    if (data) {
+      setName(data.name || user?.user_metadata?.name || '');
+      setEmail(data.email || user?.email || '');
     }
-  });
+    setLoading(false);
+  };
 
-  document.title = "Profile | Velzon - React Admin & Dashboard Template";
+  const handleUpdateProfile = async () => {
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      // Update profile table
+      await supabase.from('profiles').update({ name, email }).eq('id', user?.id);
+
+      // Update auth metadata
+      await supabase.auth.updateUser({ data: { name } });
+
+      setSuccess('Profile updated successfully!');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!newPassword || !confirmPassword) {
+      setPwError('Please fill both fields');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError('Passwords do not match');
+      return;
+    }
+    if (newPassword.length < 8) {
+      setPwError('Password must be at least 8 characters');
+      return;
+    }
+    setPwSaving(true);
+    setPwError('');
+    setPwSuccess('');
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      setPwSuccess('Password changed successfully!');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setPwSuccess(''), 3000);
+    } catch (err: any) {
+      setPwError(err.message);
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
+  const initials = name ? name.charAt(0).toUpperCase() : email.charAt(0).toUpperCase();
+
+  if (loading) return (
+    <div className="page-content">
+      <div className="text-center py-5"><Spinner color="primary" /></div>
+    </div>
+  );
+
   return (
     <React.Fragment>
-      <div className="page-content mt-lg-5">
+      <div className="page-content">
         <Container fluid>
-          <Row>
-            <Col lg="12">
-              {error && error ? <Alert color="danger">{error}</Alert> : null}
-              {success ? <Alert color="success">Username Updated To {userName}</Alert> : null}
+          <BreadCrumb title="Profile" pageTitle="Finance Portal" />
 
+          <Row>
+            <Col md={4}>
+              {/* Profile Card */}
+              <Card>
+                <CardBody className="text-center py-4">
+                  <div style={{
+                    width: 80, height: 80, borderRadius: '50%',
+                    background: '#405189', color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 700, fontSize: 32, margin: '0 auto 16px'
+                  }}>
+                    {initials}
+                  </div>
+                  <h5 className="mb-1">{name || 'User'}</h5>
+                  <p className="text-muted mb-3">{email}</p>
+                  <div className="d-flex justify-content-center gap-2">
+                    <span className="badge bg-success-subtle text-success px-3 py-2">
+                      <i className="ri-shield-check-line me-1"></i>Active Account
+                    </span>
+                  </div>
+                </CardBody>
+              </Card>
+
+              {/* Account Info */}
+              <Card>
+                <CardHeader><h5 className="mb-0">Account Info</h5></CardHeader>
+                <CardBody>
+                  <div className="d-flex justify-content-between py-2 border-bottom">
+                    <small className="text-muted">User ID</small>
+                    <small className="fw-semibold text-truncate ms-2" style={{ maxWidth: 150 }}>{user?.id?.slice(0, 8)}...</small>
+                  </div>
+                  <div className="d-flex justify-content-between py-2 border-bottom">
+                    <small className="text-muted">Email</small>
+                    <small className="fw-semibold">{email}</small>
+                  </div>
+                  <div className="d-flex justify-content-between py-2 border-bottom">
+                    <small className="text-muted">Currency</small>
+                    <small className="fw-semibold">PKR (Rs.)</small>
+                  </div>
+                  <div className="d-flex justify-content-between py-2">
+                    <small className="text-muted">Member Since</small>
+                    <small className="fw-semibold">
+                      {user?.created_at ? new Date(user.created_at).toLocaleDateString('en-PK', { month: 'short', year: 'numeric' }) : '—'}
+                    </small>
+                  </div>
+                </CardBody>
+              </Card>
+
+              {/* Logout */}
               <Card>
                 <CardBody>
-                  <div className="d-flex">
-                    <div className="mx-3">
-                      <img
-                        src={avatar}
-                        alt=""
-                        className="avatar-md rounded-circle img-thumbnail"
+                  <Button color="danger" outline className="w-100" onClick={signOut}>
+                    <i className="ri-logout-box-line me-2"></i>Sign Out
+                  </Button>
+                </CardBody>
+              </Card>
+            </Col>
+
+            <Col md={8}>
+              {/* Edit Profile */}
+              <Card className="mb-4">
+                <CardHeader><h5 className="mb-0">Edit Profile</h5></CardHeader>
+                <CardBody>
+                  {success && <Alert color="success">{success}</Alert>}
+                  {error && <Alert color="danger">{error}</Alert>}
+                  <Form>
+                    <FormGroup>
+                      <Label>Full Name</Label>
+                      <Input
+                        value={name}
+                        onChange={e => setName(e.target.value)}
+                        placeholder="Your full name"
                       />
-                    </div>
-                    <div className="flex-grow-1 align-self-center">
-                      <div className="text-muted">
-                        <h5>{userName || "Admin"}</h5>
-                        <p className="mb-1">Email Id : {email}</p>
-                        <p className="mb-0">Id No : #{idx}</p>
-                      </div>
-                    </div>
-                  </div>
+                    </FormGroup>
+                    <FormGroup>
+                      <Label>Email</Label>
+                      <Input
+                        type="email"
+                        value={email}
+                        disabled
+                        className="bg-light"
+                      />
+                      <small className="text-muted">Email cannot be changed</small>
+                    </FormGroup>
+                    <Button color="success" onClick={handleUpdateProfile} disabled={saving}>
+                      {saving && <Spinner size="sm" className="me-2" />}
+                      Save Changes
+                    </Button>
+                  </Form>
+                </CardBody>
+              </Card>
+
+              {/* Change Password */}
+              <Card>
+                <CardHeader><h5 className="mb-0">Change Password</h5></CardHeader>
+                <CardBody>
+                  {pwSuccess && <Alert color="success">{pwSuccess}</Alert>}
+                  {pwError && <Alert color="danger">{pwError}</Alert>}
+                  <Form>
+                    <FormGroup>
+                      <Label>New Password</Label>
+                      <Input
+                        type="password"
+                        value={newPassword}
+                        onChange={e => setNewPassword(e.target.value)}
+                        placeholder="Min 8 characters"
+                      />
+                    </FormGroup>
+                    <FormGroup>
+                      <Label>Confirm New Password</Label>
+                      <Input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={e => setConfirmPassword(e.target.value)}
+                        placeholder="Repeat new password"
+                      />
+                    </FormGroup>
+                    <Button color="warning" onClick={handleChangePassword} disabled={pwSaving}>
+                      {pwSaving && <Spinner size="sm" className="me-2" />}
+                      Change Password
+                    </Button>
+                  </Form>
                 </CardBody>
               </Card>
             </Col>
           </Row>
-
-          <h4 className="card-title mb-4">Change User Name</h4>
-
-          <Card>
-            <CardBody>
-              <Form
-                className="form-horizontal"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  validation.handleSubmit();
-                  return false;
-                }}
-              >
-                <div className="form-group">
-                  <Label className="form-label">User Name</Label>
-                  <Input
-                    name="first_name"
-                    // value={name}
-                    className="form-control"
-                    placeholder="Enter User Name"
-                    type="text"
-                    onChange={validation.handleChange}
-                    onBlur={validation.handleBlur}
-                    value={validation.values.first_name || ""}
-                    invalid={
-                      validation.touched.first_name && validation.errors.first_name ? true : false
-                    }
-                  />
-                  {validation.touched.first_name && validation.errors.first_name ? (
-                    <FormFeedback type="invalid">{validation.errors.first_name}</FormFeedback>
-                  ) : null}
-                  <Input name="idx" value={idx} type="hidden" />
-                </div>
-                <div className="text-center mt-4">
-                  <Button type="submit" color="danger">
-                    Update User Name
-                  </Button>
-                </div>
-              </Form>
-            </CardBody>
-          </Card>
         </Container>
       </div>
     </React.Fragment>

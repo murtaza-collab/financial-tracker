@@ -1,312 +1,198 @@
-import React, { useState } from 'react';
-import { Col, Dropdown, DropdownMenu, DropdownToggle, Nav, NavItem, NavLink, Row, TabContent, TabPane } from 'reactstrap';
+import React, { useState, useEffect } from 'react';
+import { Dropdown, DropdownMenu, DropdownToggle } from 'reactstrap';
 import { Link } from 'react-router-dom';
-import classnames from 'classnames';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 
-//import images
-import avatar2 from "../../assets/images/users/avatar-2.jpg";
-import avatar8 from "../../assets/images/users/avatar-8.jpg";
-import avatar3 from "../../assets/images/users/avatar-3.jpg";
-import avatar6 from "../../assets/images/users/avatar-6.jpg";
-import bell from "../../assets/images/svg/bell.svg";
-
-//SimpleBar
-import SimpleBar from "simplebar-react";
+interface Notification {
+  type: string;
+  message: string;
+  link: string;
+  urgency: string;
+}
 
 const NotificationDropdown = () => {
-    //Dropdown Toggle
-    const [isNotificationDropdown, setIsNotificationDropdown] = useState(false);
-    const toggleNotificationDropdown = () => {
-        setIsNotificationDropdown(!isNotificationDropdown);
-    };
+  const { user } = useAuth();
+  const [isOpen, setIsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
-    //Tab 
-    const [activeTab, setActiveTab] = useState('1');
-    const toggleTab = (tab : any) => {
-        if (activeTab !== tab) {
-            setActiveTab(tab);
-        }
-    };
-    return (
-        <React.Fragment>
-            <Dropdown isOpen={isNotificationDropdown} toggle={toggleNotificationDropdown} className="topbar-head-dropdown ms-1 header-item">
-                <DropdownToggle type="button" tag="button" className="btn btn-icon btn-topbar btn-ghost-secondary rounded-circle">
-                    <i className='bx bx-bell fs-22'></i>
-                    <span
-                        className="position-absolute topbar-badge fs-10 translate-middle badge rounded-pill bg-danger">3<span
-                            className="visually-hidden">unread messages</span></span>
-                </DropdownToggle>
-                <DropdownMenu className="dropdown-menu-lg dropdown-menu-end p-0">
-                    <div className="dropdown-head bg-primary bg-pattern rounded-top">
-                        <div className="p-3">
-                            <Row className="align-items-center">
-                                <Col>
-                                    <h6 className="m-0 fs-16 fw-semibold text-white"> Notifications </h6>
-                                </Col>
-                                <div className="col-auto dropdown-tabs">
-                                    <span className="badge bg-light-subtle text-body fs-13"> 4 New</span>
-                                </div>
-                            </Row>
-                        </div>
+  const toggle = () => setIsOpen(!isOpen);
 
-                        <div className="px-2 pt-2">
-                            <Nav className="nav-tabs dropdown-tabs nav-tabs-custom">
-                                <NavItem>
-                                    <NavLink
-                                        href="#"
-                                        className={classnames({ active: activeTab === '1' })}
-                                        onClick={() => { toggleTab('1'); }}
-                                    >
-                                        All (4)
-                                    </NavLink>
-                                </NavItem>
-                                <NavItem>
-                                    <NavLink
-                                        href="#"
-                                        className={classnames({ active: activeTab === '2' })}
-                                        onClick={() => { toggleTab('2'); }}
-                                    >
-                                        Messages
-                                    </NavLink>
-                                </NavItem>
-                                <NavItem>
-                                    <NavLink
-                                        href="#"
-                                        className={classnames({ active: activeTab === '3' })}
-                                        onClick={() => { toggleTab('3'); }}
-                                    >
-                                        Alerts
-                                    </NavLink>
-                                </NavItem>
-                            </Nav>
-                        </div>
+  useEffect(() => {
+    if (!user) return;
+    fetchNotifications();
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchNotifications = async () => {
+    const alerts: Notification[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const in7Days = new Date(today);
+    in7Days.setDate(today.getDate() + 7);
+
+    // Check credit card bills due soon
+    const { data: bills } = await supabase
+      .from('bills')
+      .select('*, accounts!bills_account_id_fkey(name)')
+      .eq('user_id', user?.id)
+      .neq('status', 'paid')
+      .not('due_date', 'is', null);
+
+    bills?.forEach(bill => {
+      const dueDate = new Date(bill.due_date);
+      const daysLeft = Math.ceil((dueDate.getTime() - today.getTime()) / 86400000);
+      if (daysLeft < 0) {
+        alerts.push({
+          type: 'danger',
+          message: `${bill.accounts?.name} bill overdue by ${Math.abs(daysLeft)} days`,
+          link: '/credit-cards',
+          urgency: 'high',
+        });
+      } else if (daysLeft <= 7) {
+        alerts.push({
+          type: 'warning',
+          message: `${bill.accounts?.name} bill due in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+          link: '/credit-cards',
+          urgency: 'medium',
+        });
+      }
+    });
+
+    // Check EMIs due soon
+    const { data: emiPayments } = await supabase
+      .from('emi_payments')
+      .select('*, emis!emi_payments_emi_id_fkey(loan_name)')
+      .eq('user_id', user?.id)
+      .is('paid_date', null)
+      .lte('due_date', in7Days.toISOString().split('T')[0])
+      .order('due_date', { ascending: true });
+
+    emiPayments?.forEach(p => {
+      const daysLeft = Math.ceil((new Date(p.due_date).getTime() - today.getTime()) / 86400000);
+      if (daysLeft < 0) {
+        alerts.push({
+          type: 'danger',
+          message: `${p.emis?.loan_name} EMI overdue`,
+          link: '/emis',
+          urgency: 'high',
+        });
+      } else {
+        alerts.push({
+          type: 'warning',
+          message: `${p.emis?.loan_name} EMI due in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+          link: '/emis',
+          urgency: 'medium',
+        });
+      }
+    });
+
+    // Check pending recurring transactions
+    const { data: pending } = await supabase
+      .from('recurring_instances')
+      .select('*, recurring_rules(name)')
+      .eq('user_id', user?.id)
+      .eq('status', 'pending');
+
+    if (pending && pending.length > 0) {
+      alerts.push({
+        type: 'info',
+        message: `${pending.length} recurring transaction${pending.length > 1 ? 's' : ''} pending confirmation`,
+        link: '/recurring',
+        urgency: 'low',
+      });
+    }
+
+    // Check overdue loans
+    const { data: loans } = await supabase
+      .from('loans')
+      .select('person_name, outstanding, due_date, direction')
+      .eq('user_id', user?.id)
+      .eq('status', 'active')
+      .not('due_date', 'is', null);
+
+    loans?.forEach(loan => {
+      const daysLeft = Math.ceil((new Date(loan.due_date).getTime() - today.getTime()) / 86400000);
+      if (daysLeft < 0 && loan.direction === 'given') {
+        alerts.push({
+          type: 'danger',
+          message: `Loan from ${loan.person_name} overdue`,
+          link: '/loans-given',
+          urgency: 'high',
+        });
+      }
+    });
+
+    // Sort by urgency
+    const order: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    alerts.sort((a, b) => order[a.urgency] - order[b.urgency]);
+    setNotifications(alerts.slice(0, 10));
+  };
+
+  const getIcon = (type: string) => {
+    if (type === 'danger') return <i className="ri-error-warning-line text-danger fs-16"></i>;
+    if (type === 'warning') return <i className="ri-time-line text-warning fs-16"></i>;
+    return <i className="ri-information-line text-info fs-16"></i>;
+  };
+
+  const getBg = (type: string) => {
+    if (type === 'danger') return 'bg-danger-subtle';
+    if (type === 'warning') return 'bg-warning-subtle';
+    return 'bg-info-subtle';
+  };
+
+  return (
+    <React.Fragment>
+      <Dropdown isOpen={isOpen} toggle={toggle} className="topbar-head-dropdown ms-1 header-item">
+        <DropdownToggle type="button" tag="button" className="btn btn-icon btn-topbar btn-ghost-secondary rounded-circle">
+          <i className='bx bx-bell fs-22'></i>
+          {notifications.length > 0 && (
+            <span className="position-absolute topbar-badge fs-10 translate-middle badge rounded-pill bg-danger">
+              {notifications.length}
+            </span>
+          )}
+        </DropdownToggle>
+        <DropdownMenu className="dropdown-menu-lg dropdown-menu-end p-0">
+          <div className="dropdown-head bg-primary bg-pattern rounded-top p-3">
+            <div className="d-flex justify-content-between align-items-center">
+              <h6 className="m-0 fs-16 fw-semibold text-white">Notifications</h6>
+              <span className="badge bg-light-subtle text-body fs-13">
+                {notifications.length} Alert{notifications.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </div>
+
+          <div style={{ maxHeight: 350, overflowY: 'auto' }}>
+            {notifications.length === 0 ? (
+              <div className="text-center py-4">
+                <i className="ri-checkbox-circle-line fs-1 text-success"></i>
+                <p className="text-muted mt-2 mb-0">All caught up! No alerts.</p>
+              </div>
+            ) : (
+              notifications.map((n, i) => (
+                <Link to={n.link} key={i} className="text-reset notification-item d-block dropdown-item" onClick={() => setIsOpen(false)}>
+                  <div className="d-flex align-items-center gap-3 py-2">
+                    <div className={`avatar-xs ${getBg(n.type)} rounded-circle d-flex align-items-center justify-content-center`}>
+                      {getIcon(n.type)}
                     </div>
+                    <div className="flex-grow-1">
+                      <p className="mb-0 fs-13">{n.message}</p>
+                    </div>
+                    <i className="ri-arrow-right-s-line text-muted"></i>
+                  </div>
+                </Link>
+              ))
+            )}
+          </div>
 
-                    <TabContent activeTab={activeTab}>
-                        <TabPane tabId="1" className="py-2 ps-2">
-                            <SimpleBar style={{ maxHeight: "300px" }} className="pe-2">
-                                <div className="text-reset notification-item d-block dropdown-item position-relative">
-                                    <div className="d-flex">
-                                        <div className="avatar-xs me-3">
-                                            <span className="avatar-title bg-info-subtle text-info rounded-circle fs-16">
-                                                <i className="bx bx-badge-check"></i>
-                                            </span>
-                                        </div>
-                                        <div className="flex-grow-1">
-                                            <Link to="#" className="stretched-link">
-                                                <h6 className="mt-0 mb-2 lh-base">Your <b>Elite</b> author Graphic
-                                                    Optimization <span className="text-secondary">reward</span> is ready!
-                                                </h6>
-                                            </Link>
-                                            <p className="mb-0 fs-11 fw-medium text-uppercase text-muted">
-                                                <span><i className="mdi mdi-clock-outline"></i> Just 30 sec ago</span>
-                                            </p>
-                                        </div>
-                                        <div className="px-2 fs-15">
-                                            <div className="form-check notification-check">
-                                                <input className="form-check-input" type="checkbox" value="" id="all-notification-check01" />
-                                                <label className="form-check-label" htmlFor="all-notification-check01"></label>
-                                            </div>
-                                            {/* <input className="form-check-input" type="checkbox" /> */}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="text-reset notification-item d-block dropdown-item position-relative active">
-                                    <div className="d-flex">
-                                        <img src={avatar2}
-                                            className="me-3 rounded-circle avatar-xs" alt="user-pic" />
-                                        <div className="flex-grow-1">
-                                            <Link to="#" className="stretched-link"><h6 className="mt-0 mb-1 fs-13 fw-semibold">Angela Bernier</h6></Link>
-                                            <div className="fs-13 text-muted">
-                                                <p className="mb-1">Answered to your comment on the cash flow forecast's
-                                                    graph 🔔.</p>
-                                            </div>
-                                            <p className="mb-0 fs-11 fw-medium text-uppercase text-muted">
-                                                <span><i className="mdi mdi-clock-outline"></i> 48 min ago</span>
-                                            </p>
-                                        </div>
-                                        <div className="px-2 fs-15">
-                                            <div className="form-check notification-check">
-                                                <input className="form-check-input" type="checkbox" value="" id="all-notification-check02"/>
-                                                <label className="form-check-label" htmlFor="all-notification-check02"></label>
-                                            </div>
-                                            {/* <input className="form-check-input" type="checkbox" /> */}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="text-reset notification-item d-block dropdown-item position-relative">
-                                    <div className="d-flex">
-                                        <div className="avatar-xs me-3">
-                                            <span
-                                                className="avatar-title bg-danger-subtle text-danger rounded-circle fs-16">
-                                                <i className='bx bx-message-square-dots'></i>
-                                            </span>
-                                        </div>
-                                        <div className="flex-grow-1">
-                                            <Link to="#" className="stretched-link">
-                                                <h6 className="mt-0 mb-2 fs-13 lh-base">You have received <b className="text-success">20</b> new messages in the conversation</h6>
-                                            </Link>
-                                            <p className="mb-0 fs-11 fw-medium text-uppercase text-muted">
-                                                <span><i className="mdi mdi-clock-outline"></i> 2 hrs ago</span>
-                                            </p>
-                                        </div>
-                                        <div className="px-2 fs-15">
-                                            <div className="form-check notification-check">
-                                                <input className="form-check-input" type="checkbox" value="" id="all-notification-check03" />
-                                                <label className="form-check-label" htmlFor="all-notification-check03"></label>
-                                            </div>
-                                            {/* <input className="form-check-input" type="checkbox" /> */}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="text-reset notification-item d-block dropdown-item position-relative">
-                                    <div className="d-flex">
-                                        <img src={avatar8} className="me-3 rounded-circle avatar-xs" alt="user-pic" />
-                                        <div className="flex-grow-1">
-                                            <Link to="#" className="stretched-link"><h6 className="mt-0 mb-1 fs-13 fw-semibold">Maureen Gibson</h6></Link>
-                                            <div className="fs-13 text-muted">
-                                                <p className="mb-1">We talked about a project on linkedin.</p>
-                                            </div>
-                                            <p className="mb-0 fs-11 fw-medium text-uppercase text-muted">
-                                                <span><i className="mdi mdi-clock-outline"></i> 4 hrs ago</span>
-                                            </p>
-                                        </div>
-                                        <div className="px-2 fs-15">
-                                            <div className="form-check notification-check">
-                                                <input className="form-check-input" type="checkbox" value="" id="all-notification-check04" />
-                                                <label className="form-check-label" htmlFor="all-notification-check04"></label>
-                                            </div>
-                                            {/* <input className="form-check-input" type="checkbox" /> */}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="my-3 text-center">
-                                    <button type="button" className="btn btn-soft-success waves-effect waves-light">View
-                                        All Notifications <i className="ri-arrow-right-line align-middle"></i></button>
-                                </div>
-                            </SimpleBar>
-
-                        </TabPane>
-
-                        <TabPane tabId="2" className="py-2 ps-2">
-                            <SimpleBar style={{ maxHeight: "300px" }} className="pe-2">
-                                <div className="text-reset notification-item d-block dropdown-item">
-                                    <div className="d-flex">
-                                        <img src={avatar3}
-                                            className="me-3 rounded-circle avatar-xs" alt="user-pic" />
-                                        <div className="flex-grow-1">
-                                            <Link to="#" className="stretched-link"><h6 className="mt-0 mb-1 fs-13 fw-semibold">James Lemire</h6></Link>
-                                            <div className="fs-13 text-muted">
-                                                <p className="mb-1">We talked about a project on linkedin.</p>
-                                            </div>
-                                            <p className="mb-0 fs-11 fw-medium text-uppercase text-muted">
-                                                <span><i className="mdi mdi-clock-outline"></i> 30 min ago</span>
-                                            </p>
-                                        </div>
-                                        <div className="px-2 fs-15">
-                                        <div className="form-check notification-check">
-                                                    <input className="form-check-input" type="checkbox" value="" id="messages-notification-check01" />
-                                                    <label className="form-check-label" htmlFor="messages-notification-check01"></label>
-                                                </div>
-                                            {/* <input className="form-check-input" type="checkbox" /> */}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="text-reset notification-item d-block dropdown-item">
-                                    <div className="d-flex">
-                                        <img src={avatar2}
-                                            className="me-3 rounded-circle avatar-xs" alt="user-pic" />
-                                        <div className="flex-grow-1">
-                                            <Link to="#" className="stretched-link"><h6 className="mt-0 mb-1 fs-13 fw-semibold">Angela Bernier</h6></Link>
-                                            <div className="fs-13 text-muted">
-                                                <p className="mb-1">Answered to your comment on the cash flow forecast's
-                                                    graph 🔔.</p>
-                                            </div>
-                                            <p className="mb-0 fs-11 fw-medium text-uppercase text-muted">
-                                                <span><i className="mdi mdi-clock-outline"></i> 2 hrs ago</span>
-                                            </p>
-                                        </div>
-                                        <div className="px-2 fs-15">
-                                        <div className="form-check notification-check">
-                                                    <input className="form-check-input" type="checkbox" value="" id="messages-notification-check02" />
-                                                    <label className="form-check-label" htmlFor="messages-notification-check02"></label>
-                                                </div>
-                                            {/* <input className="form-check-input" type="checkbox" /> */}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="text-reset notification-item d-block dropdown-item">
-                                    <div className="d-flex">
-                                        <img src={avatar6}
-                                            className="me-3 rounded-circle avatar-xs" alt="user-pic" />
-                                        <div className="flex-grow-1">
-                                            <Link to="#" className="stretched-link"><h6 className="mt-0 mb-1 fs-13 fw-semibold">Kenneth Brown</h6></Link>
-                                            <div className="fs-13 text-muted">
-                                                <p className="mb-1">Mentionned you in his comment on 📃 invoice #12501. </p>
-                                            </div>
-                                            <p className="mb-0 fs-11 fw-medium text-uppercase text-muted">
-                                                <span><i className="mdi mdi-clock-outline"></i> 10 hrs ago</span>
-                                            </p>
-                                        </div>
-                                        <div className="px-2 fs-15">
-                                        <div className="form-check notification-check">
-                                                    <input className="form-check-input" type="checkbox" value="" id="messages-notification-check03" />
-                                                    <label className="form-check-label" htmlFor="messages-notification-check03"></label>
-                                                </div>
-                                            {/* <input className="form-check-input" type="checkbox" /> */}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="text-reset notification-item d-block dropdown-item">
-                                    <div className="d-flex">
-                                        <img src={avatar8}
-                                            className="me-3 rounded-circle avatar-xs" alt="user-pic" />
-                                        <div className="flex-grow-1">
-                                            <Link to="#" className="stretched-link"><h6 className="mt-0 mb-1 fs-13 fw-semibold">Maureen Gibson</h6></Link>
-                                            <div className="fs-13 text-muted">
-                                                <p className="mb-1">We talked about a project on linkedin.</p>
-                                            </div>
-                                            <p className="mb-0 fs-11 fw-medium text-uppercase text-muted">
-                                                <span><i className="mdi mdi-clock-outline"></i> 3 days ago</span>
-                                            </p>
-                                        </div>
-                                        <div className="px-2 fs-15">
-                                        <div className="form-check notification-check">
-                                                    <input className="form-check-input" type="checkbox" value="" id="messages-notification-check04" />
-                                                    <label className="form-check-label" htmlFor="messages-notification-check04"></label>
-                                                </div>
-                                            {/* <input className="form-check-input" type="checkbox" /> */}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="my-3 text-center">
-                                    <button type="button" className="btn btn-soft-success waves-effect waves-light">View
-                                        All Messages <i className="ri-arrow-right-line align-middle"></i></button>
-                                </div>
-                            </SimpleBar>
-                        </TabPane>
-                        <TabPane tabId="3" className="p-4">
-                            <div className="w-25 w-sm-50 pt-3 mx-auto">
-                                <img src={bell} className="img-fluid" alt="user-pic" />
-                            </div>
-                            <div className="text-center pb-5 mt-2">
-                                <h6 className="fs-18 fw-semibold lh-base">Hey! You have no any notifications </h6>
-                            </div>
-                        </TabPane>
-                    </TabContent>
-                </DropdownMenu>
-            </Dropdown>
-        </React.Fragment>
-    );
+          <div className="p-2 border-top">
+            <Link to="/dashboard" className="btn btn-sm btn-soft-primary w-100" onClick={() => setIsOpen(false)}>
+              Go to Dashboard
+            </Link>
+          </div>
+        </DropdownMenu>
+      </Dropdown>
+    </React.Fragment>
+  );
 };
 
 export default NotificationDropdown;
