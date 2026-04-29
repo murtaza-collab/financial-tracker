@@ -36,6 +36,37 @@ const accountTypeColors: Record<string, string> = {
   custom_wallet: 'secondary',
 };
 
+const PAKISTAN_BANKS = [
+  'AlBaraka Bank (Pakistan) Limited',
+  'Allied Bank Limited',
+  'Askari Bank Limited',
+  'Bank AL Habib Limited',
+  'Bank Alfalah Limited',
+  'The Bank of Khyber',
+  'The Bank of Punjab',
+  'BankIslami Pakistan Limited',
+  'Citibank N.A.',
+  'Deutsche Bank AG',
+  'Dubai Islamic Bank Pakistan Limited',
+  'Faysal Bank Limited',
+  'First Women Bank Limited',
+  'Habib Bank Limited',
+  'Habib Metropolitan Bank Limited',
+  'Industrial and Commercial Bank of China Limited',
+  'JS Bank Limited',
+  'Meezan Bank Limited',
+  'MCB Bank Limited',
+  'MCB Islamic Bank',
+  'National Bank of Pakistan',
+  'Samba Bank Limited',
+  'Sindh Bank Limited',
+  'Easypaisa Bank Limited',
+  'SME Bank Limited',
+  'Soneri Bank Limited',
+  'Standard Chartered Bank (Pakistan) Ltd',
+  'United Bank Limited',
+];
+
 const accountTypeIcons: Record<string, string> = {
   bank_savings: 'ri-bank-line',
   bank_current: 'ri-bank-line',
@@ -328,16 +359,20 @@ const Accounts = () => {
             </FormGroup>
 
             {['bank_savings', 'bank_current', 'credit_card'].includes(validation.values.type) && (
-              <FormGroup>
-                <Label>Bank Name</Label>
-                <Input
-                  name="bank_name"
-                  placeholder="e.g. HDFC Bank, SBI, ICICI"
-                  value={validation.values.bank_name}
-                  onChange={validation.handleChange}
-                />
-              </FormGroup>
-            )}
+  <FormGroup>
+    <Label>Bank Name</Label>
+    <Input
+      type="select"
+      name="bank_name"
+      value={validation.values.bank_name}
+      onChange={validation.handleChange}
+    >
+      <option value="">Select bank...</option>
+      {PAKISTAN_BANKS.map(b => <option key={b} value={b}>{b}</option>)}
+      <option value="Other">Other</option>
+    </Input>
+  </FormGroup>
+)}
 
             <FormGroup>
               <Label>{isCreditCard ? 'Current Outstanding (₹)' : 'Opening Balance (₹)'} <span className="text-danger">*</span></Label>
