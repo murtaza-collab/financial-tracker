@@ -17,7 +17,7 @@ interface Bill {
 }
 interface BillPayment {
   id: string; bill_id: string; amount: number; paid_date: string;
-  note: string; accounts?: { name: string };
+  account_id: string | null; note: string; accounts?: { name: string };
 }
 
 const getMonthKey = (date: Date) =>
@@ -309,6 +309,48 @@ const CreditCards = () => {
     }
   };
 
+  const handleDeletePayment = async (payment: BillPayment, bill: Bill) => {
+    if (!window.confirm('Remove this payment? Balances will be reversed.')) return;
+    try {
+      const amount = Number(payment.amount);
+
+      // Reverse bank and card balances only for real payments (account_id = null means pre-existing, no balance touch)
+      if (payment.account_id) {
+        const { data: freshBank } = await supabase.from('accounts').select('balance').eq('id', payment.account_id).single();
+        if (freshBank) {
+          await supabase.from('accounts').update({ balance: freshBank.balance + amount }).eq('id', payment.account_id);
+        }
+        const { data: freshCard } = await supabase.from('accounts').select('balance').eq('id', bill.account_id).single();
+        if (freshCard) {
+          await supabase.from('accounts').update({ balance: freshCard.balance + amount }).eq('id', bill.account_id);
+        }
+      }
+
+      await supabase.from('bill_payments').delete().eq('id', payment.id);
+
+      // Also delete linked transaction (credit_card_payment type for this bill)
+      await supabase.from('transactions')
+        .delete()
+        .eq('account_id', payment.account_id)
+        .eq('to_account_id', bill.account_id)
+        .eq('type', 'credit_card_payment')
+        .eq('amount', amount);
+
+      const { data: remaining } = await supabase.from('bill_payments').select('amount').eq('bill_id', bill.id);
+      const newTotalPaid = (remaining || []).reduce((s: number, p: any) => s + Number(p.amount), 0);
+      const stmtAmt = bill.statement_amount || 0;
+      const newStatus = stmtAmt > 0
+        ? (newTotalPaid >= stmtAmt ? 'paid' : newTotalPaid > 0 ? 'partial' : 'pending')
+        : (newTotalPaid > 0 ? 'partial' : 'pending');
+
+      await supabase.from('bills').update({ total_paid: newTotalPaid, status: newStatus }).eq('id', bill.id);
+
+      fetchData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to remove payment');
+    }
+  };
+
   const totalOutstanding = cards.reduce((s, c) => s + Number(c.balance), 0);
   const totalLimit = cards.reduce((s, c) => s + Number(c.credit_limit), 0);
   const paidBills = bills.filter(b => b.status === 'paid').length;
@@ -512,13 +554,23 @@ const CreditCards = () => {
                                 <th className="fs-12">Date</th>
                                 <th className="fs-12">From</th>
                                 <th className="fs-12 text-end">Amount</th>
+                                <th></th>
                               </tr></thead>
                               <tbody>
                                 {billPayments.map(p => (
                                   <tr key={p.id}>
                                     <td className="fs-12">{new Date(p.paid_date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short' })}</td>
-                                    <td className="fs-12 text-muted">{p.accounts?.name || '—'}</td>
+                                    <td className="fs-12 text-muted">{p.accounts?.name || <span className="text-muted fst-italic">pre-existing</span>}</td>
                                     <td className="fs-12 text-end text-success fw-semibold">{formatCurrency(p.amount)}</td>
+                                    <td className="text-end">
+                                      <button
+                                        className="btn btn-sm btn-ghost-danger p-0 px-1"
+                                        title="Remove payment"
+                                        onClick={() => bill && handleDeletePayment(p, bill)}
+                                      >
+                                        <i className="ri-delete-bin-line"></i>
+                                      </button>
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
