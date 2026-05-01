@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
+import StatementRecon from './StatementRecon';
 
 interface CreditCard {
   id: string; name: string; bank_name: string; balance: number;
@@ -65,6 +66,9 @@ const CreditCards = () => {
   const [payAccount, setPayAccount] = useState('');
   const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
   const [payNote, setPayNote] = useState('');
+
+  // Reconciliation
+  const [reconCard, setReconCard] = useState<CreditCard | null>(null);
 
   document.title = 'Credit Card Bills | Finance Portal';
 
@@ -395,6 +399,9 @@ const CreditCards = () => {
                       </div>
                     </div>
                     <div className="d-flex align-items-center gap-2">
+                      <Button color="soft-info" size="sm" onClick={() => setReconCard(card)}>
+                        <i className="ri-file-search-line me-1"></i>Reconcile
+                      </Button>
                       <Badge color={getStatusColor(bill?.status || 'pending')} pill className="fs-12 px-3 py-2">
                         {bill?.status === 'paid' ? '✓ Fully Paid' : bill?.status === 'partial' ? '⟳ Partially Paid' : '○ Pending'}
                       </Badge>
@@ -540,6 +547,16 @@ const CreditCards = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      {/* Statement Reconciliation Modal */}
+      {reconCard && (
+        <StatementRecon
+          card={reconCard}
+          userId={user?.id || ''}
+          onClose={() => setReconCard(null)}
+          onDone={() => { setReconCard(null); fetchData(); }}
+        />
+      )}
 
       {/* Payment Modal */}
       <Modal isOpen={paymentModal} toggle={() => setPaymentModal(false)} centered>
