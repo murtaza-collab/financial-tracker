@@ -226,7 +226,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
           to_account_id: values.to_account_id || null,
           category: values.category || null,
           note: values.note || null,
-          is_personal: !isFamilyTx,
+          ...(isFamilyTx && { is_personal: false }),
         }).select().single();
         if (txError) throw txError;
 
