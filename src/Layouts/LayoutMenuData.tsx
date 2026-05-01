@@ -153,21 +153,6 @@ const Navdata = () => {
             },
         },
         {
-            label: "Settings",
-            isHeader: true,
-        },
-        {
-            id: "notifications",
-            label: "Notifications",
-            icon: "bx bx-bell",
-            link: "/notification-settings",
-            click: function (e: any) {
-                e.preventDefault();
-                history("/notification-settings");
-                setIscurrentState('Notifications');
-            },
-        },
-        {
     id: "categories",
     label: "Custom Categories",
     icon: "bx bx-category",
