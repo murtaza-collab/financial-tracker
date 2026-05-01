@@ -60,6 +60,10 @@ const CreditCards = () => {
   const [stmtAmount, setStmtAmount] = useState('');
   const [stmtMinDue, setStmtMinDue] = useState('');
   const [stmtDueDate, setStmtDueDate] = useState('');
+  const [stmtAlreadyPaid, setStmtAlreadyPaid] = useState('');
+  const [stmtAlreadyPaidDate, setStmtAlreadyPaidDate] = useState(new Date().toISOString().split('T')[0]);
+  const [stmtAlreadyPaidNote, setStmtAlreadyPaidNote] = useState('');
+  const [showAlreadyPaid, setShowAlreadyPaid] = useState(false);
 
   // Payment form
   const [payAmount, setPayAmount] = useState('');
@@ -156,6 +160,10 @@ const CreditCards = () => {
     setStmtAmount(bill.statement_amount ? String(bill.statement_amount) : '');
     setStmtMinDue(bill.minimum_due ? String(bill.minimum_due) : '');
     setStmtDueDate(bill.due_date ? bill.due_date : '');
+    setStmtAlreadyPaid('');
+    setStmtAlreadyPaidDate(new Date().toISOString().split('T')[0]);
+    setStmtAlreadyPaidNote('');
+    setShowAlreadyPaid(false);
     setError('');
     setStatementModal(true);
   };
@@ -170,16 +178,34 @@ const CreditCards = () => {
     try {
       const stmtAmt = Number(stmtAmount);
       const minDue = Number(stmtMinDue) || 0;
-      const totalPaid = selectedBill.total_paid || 0;
-      const newStatus = totalPaid >= stmtAmt ? 'paid' : totalPaid > 0 ? 'partial' : 'pending';
+      const prePaid = showAlreadyPaid ? (Number(stmtAlreadyPaid) || 0) : 0;
+
+      // Combine any existing total_paid with the newly entered pre-paid amount
+      const existingPaid = selectedBill.total_paid || 0;
+      const newTotalPaid = existingPaid + prePaid;
+      const newStatus = newTotalPaid >= stmtAmt ? 'paid' : newTotalPaid > 0 ? 'partial' : 'pending';
 
       await supabase.from('bills').update({
         statement_amount: stmtAmt,
         minimum_due: minDue,
         due_date: stmtDueDate,
         total_amount: stmtAmt,
+        total_paid: newTotalPaid,
         status: newStatus,
       }).eq('id', selectedBill.id);
+
+      // Log the pre-existing payment as a record — NO balance adjustment
+      // (bank and card balances already reflect this payment since user entered current balances)
+      if (prePaid > 0) {
+        await supabase.from('bill_payments').insert({
+          bill_id: selectedBill.id,
+          user_id: user?.id,
+          amount: prePaid,
+          paid_date: stmtAlreadyPaidDate,
+          account_id: null,
+          note: stmtAlreadyPaidNote || 'Paid before adding to app',
+        });
+      }
 
       setStatementModal(false);
       fetchData();
@@ -194,7 +220,7 @@ const CreditCards = () => {
   const openPaymentModal = (bill: Bill) => {
     setSelectedBill(bill);
     const remaining = (bill.statement_amount || 0) - (bill.total_paid || 0);
-    setPayAmount(String(remaining > 0 ? remaining : ''));
+    setPayAmount(remaining > 0 ? String(remaining) : '');
     setPayAccount('');
     setPayDate(new Date().toISOString().split('T')[0]);
     setPayNote('');
@@ -471,7 +497,7 @@ const CreditCards = () => {
                       <Col md={4}>
                         <div className="d-flex justify-content-between align-items-center mb-2">
                           <p className="text-muted mb-0 fs-12">Payments Made</p>
-                          {bill && bill.status !== 'paid' && stmtAmt > 0 && (
+                          {bill && bill.status !== 'paid' && (
                             <Button color="success" size="sm" onClick={() => bill && openPaymentModal(bill)}>
                               <i className="ri-add-line me-1"></i> Add Payment
                             </Button>
@@ -499,8 +525,8 @@ const CreditCards = () => {
                             </Table>
                           </div>
                         )}
-                        {bill && bill.status !== 'paid' && stmtAmt === 0 && (
-                          <p className="text-muted fs-12 text-center">Enter statement first to log payments</p>
+                        {bill && bill.status !== 'paid' && stmtAmt === 0 && billPayments.length === 0 && (
+                          <p className="text-muted fs-12 text-center">No statement yet — you can still log pre-payments</p>
                         )}
                       </Col>
                     </Row>
@@ -537,6 +563,49 @@ const CreditCards = () => {
               <Label>Due Date</Label>
               <Input type="date" value={stmtDueDate} onChange={e => setStmtDueDate(e.target.value)} />
             </FormGroup>
+
+            {/* Already paid section — only shown on first entry (no existing payments) */}
+            {selectedBill && (selectedBill.total_paid || 0) === 0 && (
+              <div className="mt-3 border rounded p-3">
+                <div className="form-check form-switch mb-2">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="alreadyPaidToggle"
+                    checked={showAlreadyPaid}
+                    onChange={e => setShowAlreadyPaid(e.target.checked)}
+                  />
+                  <label className="form-check-label fw-semibold fs-13" htmlFor="alreadyPaidToggle">
+                    Already paid some/all before adding this?
+                  </label>
+                </div>
+                {showAlreadyPaid && (
+                  <div className="bg-light rounded p-2">
+                    <div className="alert alert-info py-2 px-3 mb-2 fs-12">
+                      Bank and card balances <strong>won't change</strong> — your current balances already reflect this payment.
+                    </div>
+                    <Row>
+                      <Col md={6}>
+                        <FormGroup className="mb-2">
+                          <Label className="fs-12">Amount Paid (PKR)</Label>
+                          <Input type="number" value={stmtAlreadyPaid} onChange={e => setStmtAlreadyPaid(e.target.value)} placeholder="0" />
+                        </FormGroup>
+                      </Col>
+                      <Col md={6}>
+                        <FormGroup className="mb-2">
+                          <Label className="fs-12">Payment Date</Label>
+                          <Input type="date" value={stmtAlreadyPaidDate} onChange={e => setStmtAlreadyPaidDate(e.target.value)} />
+                        </FormGroup>
+                      </Col>
+                    </Row>
+                    <FormGroup className="mb-0">
+                      <Label className="fs-12">Note (optional)</Label>
+                      <Input type="text" value={stmtAlreadyPaidNote} onChange={e => setStmtAlreadyPaidNote(e.target.value)} placeholder="e.g. Paid via mobile banking on 20 Apr" />
+                    </FormGroup>
+                  </div>
+                )}
+              </div>
+            )}
           </Form>
         </ModalBody>
         <ModalFooter>
@@ -567,18 +636,24 @@ const CreditCards = () => {
           {error && <Alert color="danger">{error}</Alert>}
           {selectedBill && (
             <div className="mb-3 p-2 bg-light rounded">
-              <div className="d-flex justify-content-between">
-                <small className="text-muted">Statement</small>
-                <small className="fw-semibold">{formatCurrency(selectedBill.statement_amount)}</small>
-              </div>
-              <div className="d-flex justify-content-between">
-                <small className="text-muted">Paid so far</small>
-                <small className="fw-semibold text-success">{formatCurrency(selectedBill.total_paid)}</small>
-              </div>
-              <div className="d-flex justify-content-between">
-                <small className="text-muted">Remaining</small>
-                <small className="fw-semibold text-danger">{formatCurrency(Math.max(0, selectedBill.statement_amount - selectedBill.total_paid))}</small>
-              </div>
+              {selectedBill.statement_amount > 0 ? (
+                <>
+                  <div className="d-flex justify-content-between">
+                    <small className="text-muted">Statement</small>
+                    <small className="fw-semibold">{formatCurrency(selectedBill.statement_amount)}</small>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <small className="text-muted">Paid so far</small>
+                    <small className="fw-semibold text-success">{formatCurrency(selectedBill.total_paid)}</small>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <small className="text-muted">Remaining</small>
+                    <small className="fw-semibold text-danger">{formatCurrency(Math.max(0, selectedBill.statement_amount - selectedBill.total_paid))}</small>
+                  </div>
+                </>
+              ) : (
+                <small className="text-muted">No statement entered yet — recording as pre-payment</small>
+              )}
             </div>
           )}
           <Form>
