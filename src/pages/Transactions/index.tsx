@@ -187,7 +187,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
 
   const validation = useFormik({
     initialValues: {
-      date: new Date().toISOString().slice(0, 16),
+      date: new Date().toISOString().split('T')[0],
       amount: '',
       type: 'expense',
       account_id: '',
@@ -451,8 +451,8 @@ if (recurringEnabled) {
             <Row>
               <Col md={6}>
                 <FormGroup>
-                  <Label>Date & Time <span className="text-danger">*</span></Label>
-                  <Input type="datetime-local" name="date" value={validation.values.date} onChange={validation.handleChange} />
+                  <Label>Date <span className="text-danger">*</span></Label>
+                  <Input type="date" name="date" value={validation.values.date} onChange={validation.handleChange} />
                 </FormGroup>
               </Col>
               <Col md={6}>
