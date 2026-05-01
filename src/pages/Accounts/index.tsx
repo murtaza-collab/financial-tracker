@@ -71,7 +71,7 @@ const accountTypeIcons: Record<string, string> = {
   bank_savings: 'ri-bank-line',
   bank_current: 'ri-bank-line',
   credit_card: 'ri-bank-card-line',
-  cash: 'ri-money-rupee-circle-line',
+  cash: 'ri-money-dollar-circle-line',
   custom_wallet: 'ri-wallet-3-line',
 };
 
@@ -207,7 +207,7 @@ const Accounts = () => {
                       <p className="text-muted mb-1">Total Balance</p>
                       <h4 className="text-success">{formatCurrency(totalBalance)}</h4>
                     </div>
-                    <div className="avatar-sm"><span className="avatar-title bg-success-subtle rounded-circle fs-3"><i className="ri-money-rupee-circle-line text-success"></i></span></div>
+                    <div className="avatar-sm"><span className="avatar-title bg-success-subtle rounded-circle fs-3"><i className="ri-money-dollar-circle-line text-success"></i></span></div>
                   </div>
                 </CardBody>
               </Card>
@@ -375,7 +375,7 @@ const Accounts = () => {
 )}
 
             <FormGroup>
-              <Label>{isCreditCard ? 'Current Outstanding (₹)' : 'Opening Balance (₹)'} <span className="text-danger">*</span></Label>
+              <Label>{isCreditCard ? 'Current Outstanding (PKR)' : 'Opening Balance (PKR)'} <span className="text-danger">*</span></Label>
               <Input
                 type="number"
                 name="balance"
@@ -391,7 +391,7 @@ const Accounts = () => {
             {isCreditCard && (
               <>
                 <FormGroup>
-                  <Label>Credit Limit (₹) <span className="text-danger">*</span></Label>
+                  <Label>Credit Limit (PKR) <span className="text-danger">*</span></Label>
                   <Input
                     type="number"
                     name="credit_limit"

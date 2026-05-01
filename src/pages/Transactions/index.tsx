@@ -9,7 +9,7 @@ import BreadCrumb from '../../Components/Common/BreadCrumb';
 import DeleteModal from '../../Components/Common/DeleteModal';
 import { useCategories } from '../../hooks/useCategories';
 
-interface Account { id: string; name: string; type: string; balance: number; }
+interface Account { id: string; name: string; type: string; balance: number; credit_limit?: number; }
 interface Transaction {
   id: string; date: string; amount: number; type: string;
   account_id: string; to_account_id?: string; category: string;
@@ -69,7 +69,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
 
   const fetchAccounts = async () => {
     const { data } = await supabase
-      .from('accounts').select('id, name, type, balance')
+      .from('accounts').select('id, name, type, balance, credit_limit')
       .eq('user_id', user?.id).eq('is_archived', false);
     if (data) {
       setAccounts(data);
@@ -121,13 +121,17 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
       // Fetch fresh balances so reversals are accurate
       const accountIds = [tx.account_id, tx.to_account_id].filter(Boolean) as string[];
       const { data: freshAccounts } = await supabase
-        .from('accounts').select('id, balance').in('id', accountIds);
+        .from('accounts').select('id, balance, type').in('id', accountIds);
       const bal = (id: string) => freshAccounts?.find(a => a.id === id)?.balance ?? 0;
+      const accType = (id: string) => freshAccounts?.find(a => a.id === id)?.type ?? '';
 
       // Reverse account balance(s)
       if (['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(tx.type)) {
-        // These debited the source → add back
-        await supabase.from('accounts').update({ balance: bal(tx.account_id) + amount }).eq('id', tx.account_id);
+        // Credit card: outstanding was increased, so reverse by subtracting. Bank/cash: was debited, add back.
+        const reversed = accType(tx.account_id) === 'credit_card'
+          ? bal(tx.account_id) - amount
+          : bal(tx.account_id) + amount;
+        await supabase.from('accounts').update({ balance: reversed }).eq('id', tx.account_id);
       } else if (['income', 'reimbursement_received', 'loan_received'].includes(tx.type)) {
         // These credited the source → subtract back
         await supabase.from('accounts').update({ balance: bal(tx.account_id) - amount }).eq('id', tx.account_id);
@@ -231,8 +235,11 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
         if (txError) throw txError;
 
         // Update account balances
+        const isCreditCard = sourceAccount?.type === 'credit_card';
         if (['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(values.type)) {
-          await supabase.from('accounts').update({ balance: (sourceAccount!.balance - amount) }).eq('id', values.account_id);
+          // Credit card: outstanding increases. Bank/cash: balance decreases.
+          const newBal = isCreditCard ? sourceAccount!.balance + amount : sourceAccount!.balance - amount;
+          await supabase.from('accounts').update({ balance: newBal }).eq('id', values.account_id);
         } else if (['income', 'reimbursement_received', 'loan_received'].includes(values.type)) {
           await supabase.from('accounts').update({ balance: (sourceAccount!.balance + amount) }).eq('id', values.account_id);
         } else if (values.type === 'transfer') {
@@ -495,7 +502,12 @@ if (recurringEnabled) {
                 <option value="">Select account...</option>
                 {accounts
                   .filter(a => txType === 'atm_withdrawal' ? ['bank_savings', 'bank_current'].includes(a.type) : true)
-                  .map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)
+                  .map(a => {
+                    const display = a.type === 'credit_card'
+                      ? `Available: ${formatCurrency((a.credit_limit ?? 0) - a.balance)}`
+                      : formatCurrency(a.balance);
+                    return <option key={a.id} value={a.id}>{a.name} — {display}</option>;
+                  })
                 }
               </Input>
               {validation.touched.account_id && validation.errors.account_id && <FormFeedback>{validation.errors.account_id}</FormFeedback>}
