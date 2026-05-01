@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
 
 interface Account { id: string; name: string; type: string; balance: number; credit_limit: number; }
-interface Transaction { id: string; date: string; amount: number; type: string; category: string; note: string; accounts?: { name: string }; }
+interface Transaction { id: string; date: string; amount: number; type: string; category: string; note: string; accounts?: { name: string }; is_personal?: boolean; }
 interface Bill { id: string; account_id: string; due_date: string; status: string; statement_amount: number; total_paid: number; accounts?: { name: string }; }
 interface Loan { id: string; direction: string; person_name: string; outstanding: number; }
 interface EMI { id: string; loan_name: string; emi_amount: number; tenure_months: number; paid_count: number; }
@@ -124,12 +124,18 @@ const Dashboard = () => {
 
   const netWorth = bankBalance - creditOutstanding;
 
-  const monthIncome = transactions
+  const personalTx = transactions.filter(t => t.is_personal !== false);
+
+  const monthIncome = personalTx
     .filter(t => ['income', 'reimbursement_received', 'loan_received'].includes(t.type))
     .reduce((s, t) => s + Number(t.amount), 0);
 
-  const monthExpenses = transactions
+  const monthExpenses = personalTx
     .filter(t => ['expense', 'loan_given', 'emi_payment', 'atm_withdrawal', 'goal_contribution'].includes(t.type))
+    .reduce((s, t) => s + Number(t.amount), 0);
+
+  const familyCardUsage = transactions
+    .filter(t => t.is_personal === false && t.type === 'expense')
     .reduce((s, t) => s + Number(t.amount), 0);
 
   const monthSavings  = monthIncome - monthExpenses;
@@ -142,7 +148,7 @@ const Dashboard = () => {
   const monthlyEMI     = emis.reduce((s, e) => s + Number(e.emi_amount), 0);
 
   const categorySpend: Record<string, number> = {};
-  transactions
+  personalTx
     .filter(t => ['expense', 'emi_payment', 'goal_contribution'].includes(t.type))
     .forEach(t => {
       const cat = t.category || 'Other';
@@ -252,7 +258,7 @@ const Dashboard = () => {
                       <p className="text-muted mb-1 fs-13">Income This Month</p>
                       <h4 className="text-success">+{formatCurrency(monthIncome)}</h4>
                       <small className="text-muted">
-                        {transactions.filter(t => ['income', 'reimbursement_received', 'loan_received'].includes(t.type)).length} entries
+                        {personalTx.filter(t => ['income', 'reimbursement_received', 'loan_received'].includes(t.type)).length} entries
                       </small>
                     </div>
                     <div className="avatar-sm">
@@ -272,7 +278,7 @@ const Dashboard = () => {
                       <p className="text-muted mb-1 fs-13">Spent This Month</p>
                       <h4 className="text-danger">-{formatCurrency(monthExpenses)}</h4>
                       <small className="text-muted">
-                        {transactions.filter(t => ['expense', 'loan_given', 'emi_payment', 'atm_withdrawal', 'goal_contribution'].includes(t.type)).length} transactions
+                        {personalTx.filter(t => ['expense', 'loan_given', 'emi_payment', 'atm_withdrawal', 'goal_contribution'].includes(t.type)).length} transactions
                       </small>
                     </div>
                     <div className="avatar-sm">
@@ -312,6 +318,32 @@ const Dashboard = () => {
               </Card>
             </Col>
           </Row>
+
+          {/* ── Family Card Usage ───────────────────────────────────────── */}
+          {familyCardUsage > 0 && (
+            <Row className="mb-4">
+              <Col md={4}>
+                <Card className="card-animate border-secondary">
+                  <CardBody>
+                    <div className="d-flex justify-content-between">
+                      <div>
+                        <p className="text-muted mb-1 fs-13">Family Card Usage</p>
+                        <h4 className="text-secondary">{formatCurrency(familyCardUsage)}</h4>
+                        <small className="text-muted">
+                          {transactions.filter(t => t.is_personal === false && t.type === 'expense').length} transactions — not in your budget
+                        </small>
+                      </div>
+                      <div className="avatar-sm">
+                        <span className="avatar-title bg-secondary-subtle rounded-circle fs-3">
+                          <i className="ri-user-shared-line text-secondary"></i>
+                        </span>
+                      </div>
+                    </div>
+                  </CardBody>
+                </Card>
+              </Col>
+            </Row>
+          )}
 
           {/* ── Row 3 · Budget + Loans ───────────────────────────────────── */}
           <Row className="mb-4">

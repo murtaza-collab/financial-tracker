@@ -63,6 +63,7 @@ const Budget = () => {
       .select('category, amount, type')
       .eq('user_id', user?.id)
       .eq('type', 'expense')
+      .neq('is_personal', false)
       .gte('date', startOfMonth.toISOString())
       .lte('date', endOfMonth.toISOString());
 

@@ -13,7 +13,7 @@ interface Account { id: string; name: string; type: string; balance: number; }
 interface Transaction {
   id: string; date: string; amount: number; type: string;
   account_id: string; to_account_id?: string; category: string;
-  note: string; accounts?: { name: string };
+  note: string; accounts?: { name: string }; is_personal?: boolean;
 }
 
 const TRANSACTION_TYPES = [
@@ -59,6 +59,9 @@ const Transactions = () => {
 const [recurringEnabled, setRecurringEnabled] = useState(false);
 const [recurringFrequency, setRecurringFrequency] = useState('monthly');
 const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Family toggle
+  const [isFamilyTx, setIsFamilyTx] = useState(false);
 
   document.title = 'Transactions | Finance Portal';
 
@@ -182,6 +185,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
   setRecurringEnabled(false);
   setRecurringFrequency('monthly');
   setRecurringStartDate(new Date().toISOString().split('T')[0]);
+  setIsFamilyTx(false);
   validation.resetForm();
 };
 
@@ -222,6 +226,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
           to_account_id: values.to_account_id || null,
           category: values.category || null,
           note: values.note || null,
+          is_personal: !isFamilyTx,
         }).select().single();
         if (txError) throw txError;
 
@@ -408,7 +413,10 @@ if (recurringEnabled) {
                         return (
                           <tr key={tx.id}>
                             <td>{new Date(tx.date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                            <td><Badge color={TYPE_COLORS[tx.type]} pill>{TRANSACTION_TYPES.find(t => t.value === tx.type)?.label || tx.type}</Badge></td>
+                            <td>
+                              <Badge color={TYPE_COLORS[tx.type]} pill>{TRANSACTION_TYPES.find(t => t.value === tx.type)?.label || tx.type}</Badge>
+                              {tx.is_personal === false && <Badge color="secondary" pill className="ms-1">Family</Badge>}
+                            </td>
                             <td>{tx.accounts?.name || '—'}</td>
                             <td>{tx.category || '—'}</td>
                             <td className="text-muted">{tx.note || '—'}</td>
@@ -526,6 +534,29 @@ if (recurringEnabled) {
                 onChange={validation.handleChange}
               />
             </FormGroup>
+
+            {/* Family Toggle — only for credit card expenses */}
+            {txType === 'expense' && accounts.find(a => a.id === validation.values.account_id)?.type === 'credit_card' && (
+              <div className="mt-2 mb-2">
+                <div className="form-check form-switch">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="familyToggle"
+                    checked={isFamilyTx}
+                    onChange={e => setIsFamilyTx(e.target.checked)}
+                  />
+                  <label className="form-check-label fw-semibold" htmlFor="familyToggle">
+                    Not Mine (Family usage)
+                  </label>
+                </div>
+                {isFamilyTx && (
+                  <small className="text-muted d-block mt-1">
+                    Card balance will update, but this won't count toward your personal budget or spending.
+                  </small>
+                )}
+              </div>
+            )}
 
             {/* Split Toggle — only for expenses */}
             {txType === 'expense' && (
