@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
+import DeleteModal from '../../Components/Common/DeleteModal';
 import { useCategories } from '../../hooks/useCategories';
 
 interface Account { id: string; name: string; type: string; balance: number; }
@@ -45,6 +46,9 @@ const Transactions = () => {
   const [saving, setSaving] = useState(false);
   const [filterType, setFilterType] = useState('');
   const [filterAccount, setFilterAccount] = useState('');
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [txToDelete, setTxToDelete] = useState<Transaction | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Split state
   const [splitEnabled, setSplitEnabled] = useState(false);
@@ -98,6 +102,77 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDeleteClick = (tx: Transaction) => {
+    setTxToDelete(tx);
+    setDeleteModal(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!txToDelete) return;
+    setDeleting(true);
+    try {
+      const tx = txToDelete;
+      const amount = Number(tx.amount);
+
+      // Fetch fresh balances so reversals are accurate
+      const accountIds = [tx.account_id, tx.to_account_id].filter(Boolean) as string[];
+      const { data: freshAccounts } = await supabase
+        .from('accounts').select('id, balance').in('id', accountIds);
+      const bal = (id: string) => freshAccounts?.find(a => a.id === id)?.balance ?? 0;
+
+      // Reverse account balance(s)
+      if (['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(tx.type)) {
+        // These debited the source → add back
+        await supabase.from('accounts').update({ balance: bal(tx.account_id) + amount }).eq('id', tx.account_id);
+      } else if (['income', 'reimbursement_received', 'loan_received'].includes(tx.type)) {
+        // These credited the source → subtract back
+        await supabase.from('accounts').update({ balance: bal(tx.account_id) - amount }).eq('id', tx.account_id);
+      } else if (tx.type === 'transfer' && tx.to_account_id) {
+        await supabase.from('accounts').update({ balance: bal(tx.account_id) + amount }).eq('id', tx.account_id);
+        await supabase.from('accounts').update({ balance: bal(tx.to_account_id) - amount }).eq('id', tx.to_account_id);
+      } else if (tx.type === 'atm_withdrawal') {
+        await supabase.from('accounts').update({ balance: bal(tx.account_id) + amount }).eq('id', tx.account_id);
+        if (tx.to_account_id) {
+          await supabase.from('accounts').update({ balance: bal(tx.to_account_id) - amount }).eq('id', tx.to_account_id);
+        }
+      }
+
+      // Reverse linked loan repayment (if this tx was logged as a repayment)
+      const { data: repayments } = await supabase
+        .from('loan_repayments').select('id, loan_id, amount').eq('transaction_id', tx.id);
+      if (repayments && repayments.length > 0) {
+        for (const rep of repayments) {
+          const { data: loan } = await supabase.from('loans').select('outstanding').eq('id', rep.loan_id).single();
+          if (loan) {
+            await supabase.from('loans').update({ outstanding: loan.outstanding + rep.amount, status: 'active' }).eq('id', rep.loan_id);
+          }
+        }
+        await supabase.from('loan_repayments').delete().eq('transaction_id', tx.id);
+      }
+
+      // Remove split outing linked to this transaction
+      const { data: outings } = await supabase
+        .from('outings').select('id').eq('transaction_id', tx.id);
+      if (outings && outings.length > 0) {
+        const outingIds = outings.map(o => o.id);
+        await supabase.from('outing_participants').delete().in('outing_id', outingIds);
+        await supabase.from('outings').delete().eq('transaction_id', tx.id);
+      }
+
+      // Delete the transaction
+      await supabase.from('transactions').delete().eq('id', tx.id);
+
+      setDeleteModal(false);
+      setTxToDelete(null);
+      fetchTransactions();
+      fetchAccounts();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete transaction');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const toggleModal = () => {
   setModal(!modal);
@@ -324,6 +399,7 @@ if (recurringEnabled) {
                         <th>Category</th>
                         <th>Note</th>
                         <th className="text-end">Amount</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -339,6 +415,15 @@ if (recurringEnabled) {
                             <td className={`text-end fw-semibold ${isIn ? 'text-success' : 'text-danger'}`}>
                               {isIn ? '+' : '-'}{formatCurrency(tx.amount)}
                             </td>
+                            <td className="text-end">
+                              <button
+                                className="btn btn-sm btn-ghost-danger p-1"
+                                title="Delete & reverse"
+                                onClick={() => handleDeleteClick(tx)}
+                              >
+                                <i className="ri-delete-bin-line fs-15"></i>
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -350,6 +435,12 @@ if (recurringEnabled) {
           </Card>
         </Container>
       </div>
+
+      <DeleteModal
+        show={deleteModal}
+        onDeleteClick={handleDeleteConfirm}
+        onCloseClick={() => { setDeleteModal(false); setTxToDelete(null); }}
+      />
 
       {/* Add Transaction Modal */}
       <Modal isOpen={modal} toggle={toggleModal} size="md" centered>
