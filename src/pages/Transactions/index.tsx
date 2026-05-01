@@ -58,7 +58,7 @@ const Transactions = () => {
   // Recurring state
 const [recurringEnabled, setRecurringEnabled] = useState(false);
 const [recurringFrequency, setRecurringFrequency] = useState('monthly');
-const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOString().split('T')[0]);
+const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocaleDateString('en-CA'));
 
   // Family toggle
   const [isFamilyTx, setIsFamilyTx] = useState(false);
@@ -188,14 +188,14 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
   setSelectedPeople([]);
   setRecurringEnabled(false);
   setRecurringFrequency('monthly');
-  setRecurringStartDate(new Date().toISOString().split('T')[0]);
+  setRecurringStartDate(new Date().toLocaleDateString('en-CA'));
   setIsFamilyTx(false);
   validation.resetForm();
 };
 
   const validation = useFormik({
     initialValues: {
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toLocaleDateString('en-CA'),
       amount: '',
       type: 'expense',
       account_id: '',
@@ -263,7 +263,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toISOStr
             user_id: user?.id,
             transaction_id: tx.id,
             place_name: values.note || values.category || 'Outing',
-            date: new Date(values.date).toISOString().split('T')[0],
+            date: new Date(values.date).toLocaleDateString('en-CA'),
             total_amount: amount,
             paid_by: 'me',
             total_people: totalPeople,

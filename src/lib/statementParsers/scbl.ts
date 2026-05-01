@@ -10,7 +10,7 @@ function parseDate(str: string, year: number): string {
   // str = "01 MAR" or "1 MAR"
   const [d, m] = str.trim().toUpperCase().split(/\s+/);
   const monthIdx = MONTHS_SHORT[m] ?? 0;
-  return new Date(year, monthIdx, Number(d)).toISOString().split('T')[0];
+  return new Date(year, monthIdx, Number(d)).toLocaleDateString('en-CA');
 }
 
 // Extract year from header lines (e.g. "12 Apr 2026")

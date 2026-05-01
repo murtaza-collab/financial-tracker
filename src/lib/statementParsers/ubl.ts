@@ -4,7 +4,7 @@ import { detectCategory } from './categoryMap';
 // UBL date: YYYY/MM/DD
 function parseDate(str: string): string {
   const [y, m, d] = str.split('/').map(Number);
-  return new Date(y, m - 1, d).toISOString().split('T')[0];
+  return new Date(y, m - 1, d).toLocaleDateString('en-CA');
 }
 
 // A row that starts a new transaction: card_number  txn_date  post_date

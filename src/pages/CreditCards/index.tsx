@@ -61,14 +61,14 @@ const CreditCards = () => {
   const [stmtMinDue, setStmtMinDue] = useState('');
   const [stmtDueDate, setStmtDueDate] = useState('');
   const [stmtAlreadyPaid, setStmtAlreadyPaid] = useState('');
-  const [stmtAlreadyPaidDate, setStmtAlreadyPaidDate] = useState(new Date().toISOString().split('T')[0]);
+  const [stmtAlreadyPaidDate, setStmtAlreadyPaidDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [stmtAlreadyPaidNote, setStmtAlreadyPaidNote] = useState('');
   const [showAlreadyPaid, setShowAlreadyPaid] = useState(false);
 
   // Payment form
   const [payAmount, setPayAmount] = useState('');
   const [payAccount, setPayAccount] = useState('');
-  const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
+  const [payDate, setPayDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [payNote, setPayNote] = useState('');
 
   // Reconciliation
@@ -81,54 +81,43 @@ const CreditCards = () => {
     return getMonthKey(d);
   });
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (silent = false) => {
+    if (!silent) setLoading(true);
 
-    const { data: cardData } = await supabase
-      .from('accounts').select('*')
-      .eq('user_id', user?.id).eq('type', 'credit_card').eq('is_archived', false);
-
-    const { data: bankData } = await supabase
-      .from('accounts').select('id, name, balance, type')
-      .eq('user_id', user?.id).eq('is_archived', false)
-      .in('type', ['bank_savings', 'bank_current']);
+    // Fetch cards and bank accounts in parallel
+    const [{ data: cardData }, { data: bankData }] = await Promise.all([
+      supabase.from('accounts').select('*').eq('user_id', user?.id).eq('type', 'credit_card').eq('is_archived', false),
+      supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false).in('type', ['bank_savings', 'bank_current']),
+    ]);
 
     if (cardData) {
-  setCards(cardData);
+      setCards(cardData);
 
-  // Only auto-create bill for current month — never for past months
-  const now = new Date();
-  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  
-  if (selectedMonth === currentMonthKey) {
-    for (const card of cardData) {
-      const { data: existing } = await supabase
-        .from('bills').select('id')
-        .eq('account_id', card.id).eq('month', selectedMonth).single();
+      // Auto-create missing bills for current month — all cards checked in parallel
+      const now = new Date();
+      const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-      if (!existing) {
-        const [year, month] = selectedMonth.split('-').map(Number);
-        const billingDateObj = new Date(year, month - 1, card.billing_date);
-        const dueDay = card.due_date;
-        const dueMonth = dueDay < card.billing_date ? month : month - 1;
-        const dueDateObj = new Date(year, dueMonth, dueDay);
-
-        await supabase.from('bills').insert({
-          user_id: user?.id,
-          account_id: card.id,
-          month: selectedMonth,
-          billing_date: billingDateObj.toISOString().split('T')[0],
-          due_date: dueDateObj.toISOString().split('T')[0],
-          status: 'pending',
-          total_amount: 0,
-          statement_amount: null,
-          minimum_due: null,
-          total_paid: 0,
-        });
+      if (selectedMonth === currentMonthKey) {
+        await Promise.all(cardData.map(async (card) => {
+          const { data: existing } = await supabase
+            .from('bills').select('id').eq('account_id', card.id).eq('month', selectedMonth).single();
+          if (!existing) {
+            const [year, month] = selectedMonth.split('-').map(Number);
+            const billingDateObj = new Date(year, month - 1, card.billing_date);
+            const dueDay = card.due_date;
+            const dueMonth = dueDay < card.billing_date ? month : month - 1;
+            const dueDateObj = new Date(year, dueMonth, dueDay);
+            await supabase.from('bills').insert({
+              user_id: user?.id, account_id: card.id, month: selectedMonth,
+              billing_date: billingDateObj.toLocaleDateString('en-CA'),
+              due_date: dueDateObj.toLocaleDateString('en-CA'),
+              status: 'pending', total_amount: 0,
+              statement_amount: null, minimum_due: null, total_paid: 0,
+            });
+          }
+        }));
       }
     }
-  }
-}
 
     const { data: billData } = await supabase
       .from('bills').select('*')
@@ -137,15 +126,22 @@ const CreditCards = () => {
 
     if (billData) {
       setBills(billData);
-      // Fetch payments for each bill
-      const paymentsMap: Record<string, BillPayment[]> = {};
-      for (const bill of billData) {
-        const { data: pmts } = await supabase
+
+      // Fetch all payments in one batched query instead of one per bill
+      const billIds = billData.map(b => b.id);
+      if (billIds.length > 0) {
+        const { data: allPmts } = await supabase
           .from('bill_payments').select('*, accounts!bill_payments_account_id_fkey(name)')
-          .eq('bill_id', bill.id).order('paid_date', { ascending: true });
-        if (pmts) paymentsMap[bill.id] = pmts;
+          .in('bill_id', billIds).order('paid_date', { ascending: true });
+        const paymentsMap: Record<string, BillPayment[]> = {};
+        (allPmts || []).forEach(p => {
+          if (!paymentsMap[p.bill_id]) paymentsMap[p.bill_id] = [];
+          paymentsMap[p.bill_id].push(p);
+        });
+        setPayments(paymentsMap);
+      } else {
+        setPayments({});
       }
-      setPayments(paymentsMap);
     }
 
     if (bankData) setBankAccounts(bankData);
@@ -161,7 +157,7 @@ const CreditCards = () => {
     setStmtMinDue(bill.minimum_due ? String(bill.minimum_due) : '');
     setStmtDueDate(bill.due_date ? bill.due_date : '');
     setStmtAlreadyPaid('');
-    setStmtAlreadyPaidDate(new Date().toISOString().split('T')[0]);
+    setStmtAlreadyPaidDate(new Date().toLocaleDateString('en-CA'));
     setStmtAlreadyPaidNote('');
     setShowAlreadyPaid(false);
     setError('');
@@ -208,7 +204,7 @@ const CreditCards = () => {
       }
 
       setStatementModal(false);
-      fetchData();
+      fetchData(true);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -222,7 +218,7 @@ const CreditCards = () => {
     const remaining = (bill.statement_amount || 0) - (bill.total_paid || 0);
     setPayAmount(remaining > 0 ? String(remaining) : '');
     setPayAccount('');
-    setPayDate(new Date().toISOString().split('T')[0]);
+    setPayDate(new Date().toLocaleDateString('en-CA'));
     setPayNote('');
     setError('');
     setPaymentModal(true);
@@ -301,7 +297,7 @@ const CreditCards = () => {
       }).eq('id', selectedBill.id);
 
       setPaymentModal(false);
-      fetchData();
+      fetchData(true);
     } catch (err: any) {
       setError(err.message || 'Payment failed');
     } finally {
@@ -345,7 +341,7 @@ const CreditCards = () => {
 
       await supabase.from('bills').update({ total_paid: newTotalPaid, status: newStatus }).eq('id', bill.id);
 
-      fetchData();
+      fetchData(true);
     } catch (err: any) {
       alert(err.message || 'Failed to remove payment');
     }
@@ -675,7 +671,7 @@ const CreditCards = () => {
           card={reconCard}
           userId={user?.id || ''}
           onClose={() => setReconCard(null)}
-          onDone={() => { setReconCard(null); fetchData(); }}
+          onDone={() => { setReconCard(null); fetchData(true); }}
         />
       )}
 

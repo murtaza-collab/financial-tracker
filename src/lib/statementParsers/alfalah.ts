@@ -10,7 +10,7 @@ function parseDate(str: string): string {
   const parts = str.trim().toUpperCase().split(/\s+/);
   if (parts.length === 3) {
     const [d, m, y] = parts;
-    return new Date(Number(y), MONTHS[m] ?? 0, Number(d)).toISOString().split('T')[0];
+    return new Date(Number(y), MONTHS[m] ?? 0, Number(d)).toLocaleDateString('en-CA');
   }
   return '';
 }

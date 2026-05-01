@@ -35,7 +35,7 @@ const Loans = () => {
   // Repayment form
   const [repayAmount, setRepayAmount] = useState('');
   const [repayAccount, setRepayAccount] = useState('');
-  const [repayDate, setRepayDate] = useState(new Date().toISOString().split('T')[0]);
+  const [repayDate, setRepayDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [repayNote, setRepayNote] = useState('');
 
   document.title = 'Loans | Finance Portal';
@@ -80,7 +80,7 @@ useEffect(() => {
       direction: 'given',
       person_name: '',
       principal: '',
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toLocaleDateString('en-CA'),
       due_date: '',
       account_id: '',
       notes: '',
@@ -145,7 +145,7 @@ useEffect(() => {
     setSelectedLoan(loan);
     setRepayAmount(String(loan.outstanding));
     setRepayAccount('');
-    setRepayDate(new Date().toISOString().split('T')[0]);
+    setRepayDate(new Date().toLocaleDateString('en-CA'));
     setRepayNote('');
     setError('');
     setRepayModal(true);

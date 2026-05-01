@@ -20,13 +20,13 @@ function toISO(raw: string): string {
   const ddmmmyyyy = raw.match(/^(\d{1,2})\s+([A-Z]{3})\s+(\d{4})$/i);
   if (ddmmmyyyy) {
     const m = MON[ddmmmyyyy[2].toUpperCase()] ?? 0;
-    return new Date(Number(ddmmmyyyy[3]), m, Number(ddmmmyyyy[1])).toISOString().split('T')[0];
+    return new Date(Number(ddmmmyyyy[3]), m, Number(ddmmmyyyy[1])).toLocaleDateString('en-CA');
   }
   // MMM DD, YYYY
   const mmmddyyyy = raw.match(/^([A-Z][a-z]{2})\s+(\d{1,2}),\s+(\d{4})$/i);
   if (mmmddyyyy) {
     const m = MON[mmmddyyyy[1].toUpperCase()] ?? 0;
-    return new Date(Number(mmmddyyyy[3]), m, Number(mmmddyyyy[2])).toISOString().split('T')[0];
+    return new Date(Number(mmmddyyyy[3]), m, Number(mmmddyyyy[2])).toLocaleDateString('en-CA');
   }
   return '';
 }

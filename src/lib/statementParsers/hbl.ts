@@ -10,7 +10,7 @@ function parseDate(str: string): string {
   // "Mar 14, 2026"
   const m = str.match(/([A-Z][a-z]{2})\s+(\d{1,2}),\s+(\d{4})/);
   if (!m) return '';
-  return new Date(Number(m[3]), MONTHS[m[1]] ?? 0, Number(m[2])).toISOString().split('T')[0];
+  return new Date(Number(m[3]), MONTHS[m[1]] ?? 0, Number(m[2])).toLocaleDateString('en-CA');
 }
 
 // Matches: "Mon DD, YYYY  Mon DD, YYYY  description  [-]amount"

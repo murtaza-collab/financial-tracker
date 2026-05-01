@@ -54,13 +54,13 @@ const Recurring = () => {
   const [ruleNote, setRuleNote] = useState('');
   const [ruleFrequency, setRuleFrequency] = useState('monthly');
   const [ruleIntervalDays, setRuleIntervalDays] = useState('30');
-  const [ruleStartDate, setRuleStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [ruleStartDate, setRuleStartDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [ruleEndDate, setRuleEndDate] = useState('');
 
   // Confirm form
   const [confirmAmount, setConfirmAmount] = useState('');
   const [confirmAccount, setConfirmAccount] = useState('');
-  const [confirmDate, setConfirmDate] = useState(new Date().toISOString().split('T')[0]);
+  const [confirmDate, setConfirmDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [confirmNote, setConfirmNote] = useState('');
 
   document.title = 'Recurring Transactions | Finance Portal';
@@ -110,14 +110,14 @@ const Recurring = () => {
           .from('recurring_instances')
           .select('id')
           .eq('rule_id', rule.id)
-          .eq('due_date', nextDate.toISOString().split('T')[0])
+          .eq('due_date', nextDate.toLocaleDateString('en-CA'))
           .single();
 
         if (!existing) {
           await supabase.from('recurring_instances').insert({
             rule_id: rule.id,
             user_id: user?.id,
-            due_date: nextDate.toISOString().split('T')[0],
+            due_date: nextDate.toLocaleDateString('en-CA'),
             status: 'pending',
           });
         }
@@ -129,7 +129,7 @@ const Recurring = () => {
 
       // Update rule's next_date
       await supabase.from('recurring_rules').update({
-        next_date: nextDate.toISOString().split('T')[0],
+        next_date: nextDate.toLocaleDateString('en-CA'),
       }).eq('id', rule.id);
     }
   };
@@ -185,7 +185,7 @@ const Recurring = () => {
     setRuleName(''); setRuleAmount(''); setRuleType('expense');
     setRuleAccount(''); setRuleCategory(''); setRuleNote('');
     setRuleFrequency('monthly'); setRuleIntervalDays('30');
-    setRuleStartDate(new Date().toISOString().split('T')[0]);
+    setRuleStartDate(new Date().toLocaleDateString('en-CA'));
     setRuleEndDate(''); setError('');
   };
 
@@ -193,7 +193,7 @@ const Recurring = () => {
     setSelectedInstance(instance);
     setConfirmAmount(String(instance.recurring_rules?.amount || ''));
     setConfirmAccount(instance.recurring_rules?.account_id || '');
-    setConfirmDate(new Date().toISOString().split('T')[0]);
+    setConfirmDate(new Date().toLocaleDateString('en-CA'));
     setConfirmNote(instance.recurring_rules?.note || '');
     setError('');
     setConfirmModal(true);

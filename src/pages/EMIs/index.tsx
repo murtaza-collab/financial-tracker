@@ -33,7 +33,7 @@ const EMIs = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [payAccount, setPayAccount] = useState('');
-  const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
+  const [payDate, setPayDate] = useState(new Date().toLocaleDateString('en-CA'));
 
   document.title = 'EMI Tracker | Finance Portal';
 
@@ -77,7 +77,7 @@ const EMIs = () => {
         emi_id: emiId,
         user_id: user?.id,
         month: i,
-        due_date: dueDate.toISOString().split('T')[0],
+        due_date: dueDate.toLocaleDateString('en-CA'),
         paid_date: null,
         is_prepayment: false,
       });
@@ -90,7 +90,7 @@ const EMIs = () => {
       loan_name: '',
       principal: '',
       emi_amount: '',
-      start_date: new Date().toISOString().split('T')[0],
+      start_date: new Date().toLocaleDateString('en-CA'),
       tenure_months: '',
       account_id: '',
       interest_rate: '',
@@ -146,7 +146,7 @@ const EMIs = () => {
     setSelectedEMI(emi);
     setSelectedPayment(payment);
     setPayAccount(emi.account_id || '');
-    setPayDate(new Date().toISOString().split('T')[0]);
+    setPayDate(new Date().toLocaleDateString('en-CA'));
     setError('');
     setPayModal(true);
   };

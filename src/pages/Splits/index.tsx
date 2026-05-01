@@ -42,7 +42,7 @@ const Splits = () => {
   // Settlement form
   const [settleAmount, setSettleAmount] = useState('');
   const [settleAccount, setSettleAccount] = useState('');
-  const [settleDate, setSettleDate] = useState(new Date().toISOString().split('T')[0]);
+  const [settleDate, setSettleDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [settleNote, setSettleNote] = useState('');
 
   document.title = 'Splits & Recoveries | Finance Portal';
@@ -118,7 +118,7 @@ const Splits = () => {
     const { balance } = getPersonTab(person.id);
     setSettleAmount(String(balance > 0 ? balance.toFixed(2) : ''));
     setSettleAccount('');
-    setSettleDate(new Date().toISOString().split('T')[0]);
+    setSettleDate(new Date().toLocaleDateString('en-CA'));
     setSettleNote('');
     setError('');
     setSettlementModal(true);

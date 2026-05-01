@@ -28,7 +28,7 @@ const Goals = () => {
   // Contribution form
   const [contribAmount, setContribAmount] = useState('');
   const [contribAccount, setContribAccount] = useState('');
-  const [contribDate, setContribDate] = useState(new Date().toISOString().split('T')[0]);
+  const [contribDate, setContribDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [contribNote, setContribNote] = useState('');
 
   document.title = 'Savings Goals | Finance Portal';
@@ -91,7 +91,7 @@ const Goals = () => {
     setSelectedGoal(goal);
     setContribAmount('');
     setContribAccount('');
-    setContribDate(new Date().toISOString().split('T')[0]);
+    setContribDate(new Date().toLocaleDateString('en-CA'));
     setContribNote('');
     setError('');
     setContributeModal(true);
