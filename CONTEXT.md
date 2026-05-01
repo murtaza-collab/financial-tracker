@@ -1,7 +1,7 @@
 # Financial Tracker — Project Context
 
 > Living document. Update this file whenever significant work is done, new features are added, or decisions are made.  
-> Last updated: 2026-05-01
+> Last updated: 2026-05-01 (session 2)
 
 ---
 
@@ -102,7 +102,7 @@ financial-tracker/
 
 | Route | Page | Description |
 |-------|------|-------------|
-| `/dashboard` | DashboardEcommerce | Overview: accounts, transactions, bills |
+| `/dashboard` | DashboardEcommerce | Full overview — net worth, budget bars, loans, goals, EMIs, splits, bills, recent tx |
 | `/accounts` | Accounts | Bank accounts, credit cards, cash wallets |
 | `/transactions` | Transactions | Income / expense / transfer / EMI / loan with splits & recurring |
 | `/credit-cards` | CreditCards | Credit card bill tracking, due dates |
@@ -288,17 +288,25 @@ File: `src/Layouts/LayoutMenuData.tsx`
 
 | Date | Item | Status |
 |------|------|--------|
-| 2026-05-01 | Notifications menu item removed from sidebar | Uncommitted — needs commit |
+| 2026-05-01 | Notifications menu item + Settings header removed from sidebar | ✅ Committed (`2451f29`) |
 | — | Firebase configured but commented out | Intentional — Supabase is primary |
-| — | Demo template pages still in codebase (CRM, Crypto, Ecommerce, etc.) | Template leftovers, not user-facing |
+| — | ~40 Velzon template page dirs in `src/pages/` (CRM, Crypto, Ecommerce, etc.) — none routed | Pending cleanup — see Backlog |
+| — | 14 `/auth-*` template routes registered in `allRoutes.tsx` but not used in real flow | Pending cleanup |
 
 ---
 
 ## Work Log
 
-### 2026-05-01
+### 2026-05-01 — Session 2
+- **Transaction delete with reversal** (`72c896f`) — Trash icon on every row; confirms via modal; reverses account balances, cleans linked `loan_repayments` (restores outstanding), `outing_participants` + `outings` (split links), then deletes the transaction
+- **Dashboard full redesign** (`df604b4`) — 5-row layout: position stats, this-month stats (with savings rate), budget progress bars + loans, goals + EMIs + splits-to-recover, bills + accounts + recent transactions. All 9 data sources fetched in parallel. Fixed month-stats accuracy (was capped at 10 transactions).
+- **CONTEXT.md updated** this session
+
+### 2026-05-01 — Session 1
 - Full project audit performed; CONTEXT.md created
-- Removed "Notifications" and "Settings" header from `LayoutMenuData.tsx` (uncommitted)
+- Removed "Notifications" and "Settings" header from `LayoutMenuData.tsx`
+- Updated caniuse-lite browserslist (`3dc8712`)
+- All committed in `2451f29`
 
 ### Commit History (chronological)
 | Hash | Description |
@@ -325,9 +333,30 @@ File: `src/Layouts/LayoutMenuData.tsx`
 
 > Add items here as they come up during development.
 
-- [ ] Commit the Notifications menu removal
-- [ ] Consider removing unused template pages (CRM, Crypto, Ecommerce, etc.) to reduce build size
+- [ ] **Remove Velzon template page directories** — ~40 dirs in `src/pages/` that are not routed. Removing them will shrink the build significantly and may remove the need for `--max-old-space-size=4096`. Dirs to delete listed in the "Template Cleanup" section below.
+- [ ] **Remove template auth routes** from `allRoutes.tsx` — 14 `/auth-*` basic/cover routes not used in the real flow (real flow uses `/login`, `/register`, `/forgot-password`, `/reset-password`, `/logout`)
 - [ ] Push to production / finalize launch
+
+---
+
+## Template Cleanup (Pending)
+
+### `src/pages/` directories to delete (none are in `allRoutes.tsx`)
+
+**Unused dashboards:**
+`DashboardAnalytics`, `DashboardBlog`, `DashboardCrm`, `DashboardCrypto`, `DashboardJob`, `DashboardNFT`, `DashboardProject`
+
+**Unused feature pages:**
+`BaseUi`, `AdvanceUi`, `Forms`, `Tables`, `Charts`, `Calendar`, `Chat`, `Crm`, `Crypto`, `Ecommerce`, `Invoices`, `Jobs`, `Projects`, `Tasks`, `ToDo`, `Maps`, `Icons`, `Widgets`, `Pages`, `Email`, `EmailInbox`, `FileManager`, `NFTMarketplace`, `SupportTickets`
+
+**Unused auth variants** (real auth uses `Authentication/`, not these):
+`AuthenticationInner/` — contains Basic/Cover login, signup, lockscreen, 2FA, etc.
+
+### `allRoutes.tsx` routes to remove
+
+All `/auth-*` routes (lines 87–107) — these load `AuthenticationInner` pages that are not part of the real user flow. The real routes (`/login`, `/register`, `/forgot-password`, `/reset-password`, `/logout`) stay.
+
+Optionally keep: `/pages-maintenance`, `/pages-coming-soon`, `/auth-404-alt`, `/auth-500` (useful for error handling).
 
 ---
 
