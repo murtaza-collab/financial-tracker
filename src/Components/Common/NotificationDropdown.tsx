@@ -86,17 +86,18 @@ const NotificationDropdown = () => {
       }
     });
 
-    // Check pending recurring transactions
-    const { data: pending } = await supabase
-      .from('recurring_instances')
-      .select('*, recurring_rules(name)')
+    // Check pending recurring transactions (rules where next_date <= today)
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const { data: pendingRules } = await supabase
+      .from('recurring_rules')
+      .select('id')
       .eq('user_id', user?.id)
-      .eq('status', 'pending');
+      .lte('next_date', todayStr);
 
-    if (pending && pending.length > 0) {
+    if (pendingRules && pendingRules.length > 0) {
       alerts.push({
         type: 'info',
-        message: `${pending.length} recurring transaction${pending.length > 1 ? 's' : ''} pending confirmation`,
+        message: `${pendingRules.length} recurring transaction${pendingRules.length > 1 ? 's' : ''} pending confirmation`,
         link: '/recurring',
         urgency: 'low',
       });

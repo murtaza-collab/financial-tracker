@@ -14,10 +14,6 @@ interface RecurringRule {
   end_date: string; is_active: boolean;
   accounts?: { name: string };
 }
-interface RecurringInstance {
-  id: string; rule_id: string; due_date: string; status: string;
-  recurring_rules?: RecurringRule;
-}
 
 const TRANSACTION_TYPES = [
   { value: 'expense', label: 'Expense' },
@@ -31,17 +27,32 @@ const FREQUENCIES = [
   { value: 'custom', label: 'Custom (every N days)' },
 ];
 
+const parseLocalDate = (dateStr: string) =>
+  new Date(dateStr + 'T00:00:00');
+
+const getIntervalDays = (frequency: string, intervalDays: number) => {
+  if (frequency === 'daily') return 1;
+  if (frequency === 'weekly') return 7;
+  if (frequency === 'monthly') return 30;
+  return intervalDays || 30;
+};
+
+const advanceNextDate = (rule: RecurringRule): string => {
+  const d = parseLocalDate(rule.next_date);
+  d.setDate(d.getDate() + getIntervalDays(rule.frequency, rule.interval_days));
+  return d.toLocaleDateString('en-CA');
+};
+
 const Recurring = () => {
   const { user } = useAuth();
   const categories = useCategories(user?.id);
   const [rules, setRules] = useState<RecurringRule[]>([]);
-  const [instances, setInstances] = useState<RecurringInstance[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('pending');
   const [modal, setModal] = useState(false);
   const [confirmModal, setConfirmModal] = useState(false);
-  const [selectedInstance, setSelectedInstance] = useState<RecurringInstance | null>(null);
+  const [selectedRule, setSelectedRule] = useState<RecurringRule | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -67,7 +78,6 @@ const Recurring = () => {
 
   const fetchData = async () => {
     setLoading(true);
-
     const [{ data: accData }, { data: rulesData }] = await Promise.all([
       supabase.from('accounts').select('id, name, type, balance')
         .eq('user_id', user?.id).eq('is_archived', false),
@@ -76,74 +86,16 @@ const Recurring = () => {
         .eq('user_id', user?.id).eq('is_active', true)
         .order('next_date', { ascending: true }),
     ]);
-
     if (accData) setAccounts(accData);
-    if (rulesData) {
-      setRules(rulesData);
-      // Generate pending instances first, then fetch — so new instances are included
-      await generatePendingInstances(rulesData);
-    }
-
-    // Fetch instances after generation so newly created ones are included
-    const { data: instancesData } = await supabase
-      .from('recurring_instances')
-      .select('*, recurring_rules(*, accounts!recurring_rules_account_id_fkey(name))')
-      .eq('user_id', user?.id)
-      .eq('status', 'pending')
-      .order('due_date', { ascending: true });
-
-    if (instancesData) setInstances(instancesData);
+    if (rulesData) setRules(rulesData);
     setLoading(false);
   };
 
-  const generatePendingInstances = async (rulesData: RecurringRule[]) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    for (const rule of rulesData) {
-      // Parse as local midnight — new Date('YYYY-MM-DD') is UTC midnight (wrong in PKT)
-      let nextDate = new Date(rule.next_date + 'T00:00:00');
-      nextDate.setHours(0, 0, 0, 0);
-
-      // Generate instances for all overdue dates
-      while (nextDate <= today) {
-        // Check if instance already exists
-        const { data: existing } = await supabase
-          .from('recurring_instances')
-          .select('id')
-          .eq('rule_id', rule.id)
-          .eq('due_date', nextDate.toLocaleDateString('en-CA'))
-          .single();
-
-        if (!existing) {
-          await supabase.from('recurring_instances').insert({
-            rule_id: rule.id,
-            user_id: user?.id,
-            due_date: nextDate.toLocaleDateString('en-CA'),
-            status: 'pending',
-          });
-        }
-
-        // Move to next date
-        const intervalDays = getIntervalDays(rule.frequency, rule.interval_days);
-        nextDate.setDate(nextDate.getDate() + intervalDays);
-      }
-
-      // Update rule's next_date
-      await supabase.from('recurring_rules').update({
-        next_date: nextDate.toLocaleDateString('en-CA'),
-      }).eq('id', rule.id);
-    }
-  };
-
-  const getIntervalDays = (frequency: string, intervalDays: number) => {
-    if (frequency === 'daily') return 1;
-    if (frequency === 'weekly') return 7;
-    if (frequency === 'monthly') return 30;
-    return intervalDays || 30;
-  };
-
   useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Rules due today or overdue — shown in Pending tab
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const pendingRules = rules.filter(r => parseLocalDate(r.next_date) <= today);
 
   const handleAddRule = async () => {
     if (!ruleName || !ruleAmount || !ruleAccount) {
@@ -191,18 +143,18 @@ const Recurring = () => {
     setRuleEndDate(''); setError('');
   };
 
-  const openConfirmModal = (instance: RecurringInstance) => {
-    setSelectedInstance(instance);
-    setConfirmAmount(String(instance.recurring_rules?.amount || ''));
-    setConfirmAccount(instance.recurring_rules?.account_id || '');
+  const openConfirmModal = (rule: RecurringRule) => {
+    setSelectedRule(rule);
+    setConfirmAmount(String(rule.amount));
+    setConfirmAccount(rule.account_id || '');
     setConfirmDate(new Date().toLocaleDateString('en-CA'));
-    setConfirmNote(instance.recurring_rules?.note || '');
+    setConfirmNote(rule.note || '');
     setError('');
     setConfirmModal(true);
   };
 
   const handleConfirm = async () => {
-    if (!selectedInstance || !confirmAmount || !confirmAccount) {
+    if (!selectedRule || !confirmAmount || !confirmAccount) {
       setError('Please fill all required fields');
       return;
     }
@@ -210,35 +162,32 @@ const Recurring = () => {
     setError('');
     try {
       const amount = Number(confirmAmount);
-      const rule = selectedInstance.recurring_rules!;
       const { data: freshAcc } = await supabase
         .from('accounts').select('balance').eq('id', confirmAccount).single();
 
       // Create transaction
-      const { data: tx } = await supabase.from('transactions').insert({
+      await supabase.from('transactions').insert({
         user_id: user?.id,
         date: new Date(confirmDate).toISOString(),
         amount,
-        type: rule.type,
+        type: selectedRule.type,
         account_id: confirmAccount,
-        category: rule.category || null,
-        note: confirmNote || rule.name,
-      }).select().single();
+        category: selectedRule.category || null,
+        note: confirmNote || selectedRule.name,
+      });
 
       // Update account balance
       if (freshAcc) {
-        const isIncome = ['income', 'reimbursement_received', 'loan_received'].includes(rule.type);
-        const newBalance = isIncome
-          ? freshAcc.balance + amount
-          : freshAcc.balance - amount;
-        await supabase.from('accounts').update({ balance: newBalance }).eq('id', confirmAccount);
+        const isIncome = ['income', 'reimbursement_received', 'loan_received'].includes(selectedRule.type);
+        await supabase.from('accounts').update({
+          balance: isIncome ? freshAcc.balance + amount : freshAcc.balance - amount,
+        }).eq('id', confirmAccount);
       }
 
-      // Mark instance as confirmed
-      await supabase.from('recurring_instances').update({
-        status: 'confirmed',
-        transaction_id: tx?.id || null,
-      }).eq('id', selectedInstance.id);
+      // Advance next_date to next occurrence
+      await supabase.from('recurring_rules').update({
+        next_date: advanceNextDate(selectedRule),
+      }).eq('id', selectedRule.id);
 
       setConfirmModal(false);
       fetchData();
@@ -249,9 +198,11 @@ const Recurring = () => {
     }
   };
 
-  const handleSkip = async (instanceId: string) => {
-    if (!window.confirm('Skip this occurrence? It will be marked as skipped.')) return;
-    await supabase.from('recurring_instances').update({ status: 'skipped' }).eq('id', instanceId);
+  const handleSkip = async (rule: RecurringRule) => {
+    if (!window.confirm('Skip this occurrence?')) return;
+    await supabase.from('recurring_rules').update({
+      next_date: advanceNextDate(rule),
+    }).eq('id', rule.id);
     fetchData();
   };
 
@@ -262,11 +213,9 @@ const Recurring = () => {
   };
 
   const getDaysOverdue = (dateStr: string) => {
-    const days = Math.ceil((new Date().setHours(0,0,0,0) - new Date(dateStr).getTime()) / 86400000);
-    return days;
+    const due = parseLocalDate(dateStr); due.setHours(0, 0, 0, 0);
+    return Math.ceil((today.getTime() - due.getTime()) / 86400000);
   };
-
-  const pendingInstances = instances.filter(i => i.status === 'pending');
 
   return (
     <React.Fragment>
@@ -281,8 +230,8 @@ const Recurring = () => {
                   <div className="d-flex justify-content-between">
                     <div>
                       <p className="text-muted mb-1">Pending Confirmations</p>
-                      <h4 className={pendingInstances.length > 0 ? 'text-warning' : 'text-success'}>
-                        {pendingInstances.length}
+                      <h4 className={pendingRules.length > 0 ? 'text-warning' : 'text-success'}>
+                        {pendingRules.length}
                       </h4>
                       <small className="text-muted">Awaiting your review</small>
                     </div>
@@ -316,7 +265,7 @@ const Recurring = () => {
               <Nav tabs className="card-header-tabs">
                 <NavItem>
                   <NavLink active={activeTab === 'pending'} onClick={() => setActiveTab('pending')} style={{ cursor: 'pointer' }}>
-                    Pending <Badge color="warning" className="ms-1">{pendingInstances.length}</Badge>
+                    Pending <Badge color="warning" className="ms-1">{pendingRules.length}</Badge>
                   </NavLink>
                 </NavItem>
                 <NavItem>
@@ -330,7 +279,7 @@ const Recurring = () => {
               {loading ? (
                 <div className="text-center py-5"><Spinner color="primary" /></div>
               ) : activeTab === 'pending' ? (
-                pendingInstances.length === 0 ? (
+                pendingRules.length === 0 ? (
                   <div className="text-center py-5">
                     <i className="ri-checkbox-circle-line fs-1 text-success"></i>
                     <p className="text-success mt-2 fw-semibold">All caught up! No pending recurring transactions.</p>
@@ -349,21 +298,18 @@ const Recurring = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {pendingInstances.map(instance => {
-                          const rule = instance.recurring_rules;
-                          const daysOverdue = getDaysOverdue(instance.due_date);
+                        {pendingRules.map(rule => {
+                          const daysOverdue = getDaysOverdue(rule.next_date);
                           return (
-                            <tr key={instance.id}>
+                            <tr key={rule.id}>
                               <td>
-                                <p className="mb-0 fw-semibold">{rule?.name}</p>
-                                <small className="text-muted">{rule?.category} • {rule?.frequency}</small>
+                                <p className="mb-0 fw-semibold">{rule.name}</p>
+                                <small className="text-muted">{rule.category} • {rule.frequency}</small>
                               </td>
-                              <td>{rule?.accounts?.name || '—'}</td>
+                              <td>{rule.accounts?.name || '—'}</td>
                               <td>
-                                <p className="mb-0">{new Date(instance.due_date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-                                {daysOverdue > 0 && (
-                                  <small className="text-danger">Overdue by {daysOverdue} day{daysOverdue > 1 ? 's' : ''}</small>
-                                )}
+                                <p className="mb-0">{parseLocalDate(rule.next_date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                {daysOverdue > 0 && <small className="text-danger">Overdue by {daysOverdue} day{daysOverdue > 1 ? 's' : ''}</small>}
                                 {daysOverdue === 0 && <small className="text-warning">Due today</small>}
                               </td>
                               <td>
@@ -371,15 +317,13 @@ const Recurring = () => {
                                   {daysOverdue > 0 ? 'Overdue' : 'Due Today'}
                                 </Badge>
                               </td>
-                              <td className="text-end fw-semibold">
-                                {formatCurrency(rule?.amount || 0)}
-                              </td>
+                              <td className="text-end fw-semibold">{formatCurrency(rule.amount)}</td>
                               <td className="text-center">
                                 <div className="d-flex justify-content-center gap-2">
-                                  <Button color="success" size="sm" onClick={() => openConfirmModal(instance)}>
+                                  <Button color="success" size="sm" onClick={() => openConfirmModal(rule)}>
                                     <i className="ri-checkbox-circle-line me-1"></i> Confirm
                                   </Button>
-                                  <Button color="soft-danger" size="sm" onClick={() => handleSkip(instance.id)}>
+                                  <Button color="soft-danger" size="sm" onClick={() => handleSkip(rule)}>
                                     Skip
                                   </Button>
                                 </div>
@@ -422,7 +366,7 @@ const Recurring = () => {
                             <td><Badge color={rule.type === 'income' ? 'success' : 'danger'} pill>{rule.type}</Badge></td>
                             <td>{rule.accounts?.name || '—'}</td>
                             <td className="text-capitalize">{rule.frequency}</td>
-                            <td>{new Date(rule.next_date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                            <td>{parseLocalDate(rule.next_date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
                             <td className="text-end fw-semibold">{formatCurrency(rule.amount)}</td>
                             <td>
                               <Button color="soft-danger" size="sm" onClick={() => handleDeactivateRule(rule.id)}>
@@ -532,19 +476,19 @@ const Recurring = () => {
       {/* Confirm Modal */}
       <Modal isOpen={confirmModal} toggle={() => setConfirmModal(false)} centered>
         <ModalHeader toggle={() => setConfirmModal(false)}>
-          Confirm — {selectedInstance?.recurring_rules?.name}
+          Confirm — {selectedRule?.name}
         </ModalHeader>
         <ModalBody>
           {error && <Alert color="danger">{error}</Alert>}
-          {selectedInstance && (
+          {selectedRule && (
             <div className="bg-light rounded p-3 mb-3">
               <div className="d-flex justify-content-between">
                 <small className="text-muted">Due Date</small>
-                <small className="fw-semibold">{new Date(selectedInstance.due_date).toLocaleDateString('en-PK', { day: '2-digit', month: 'long', year: 'numeric' })}</small>
+                <small className="fw-semibold">{parseLocalDate(selectedRule.next_date).toLocaleDateString('en-PK', { day: '2-digit', month: 'long', year: 'numeric' })}</small>
               </div>
               <div className="d-flex justify-content-between mt-1">
                 <small className="text-muted">Default Amount</small>
-                <small className="fw-semibold">{formatCurrency(selectedInstance.recurring_rules?.amount || 0)}</small>
+                <small className="fw-semibold">{formatCurrency(selectedRule.amount)}</small>
               </div>
             </div>
           )}
@@ -556,7 +500,7 @@ const Recurring = () => {
             <FormGroup>
               <Label>Amount (PKR) <span className="text-danger">*</span></Label>
               <Input type="number" value={confirmAmount} onChange={e => setConfirmAmount(e.target.value)} />
-              <small className="text-muted">You can adjust if amount changed this month</small>
+              <small className="text-muted">Adjust if amount changed this month</small>
             </FormGroup>
             <FormGroup>
               <Label>Account <span className="text-danger">*</span></Label>
