@@ -101,7 +101,8 @@ const Recurring = () => {
     today.setHours(0, 0, 0, 0);
 
     for (const rule of rulesData) {
-      let nextDate = new Date(rule.next_date);
+      // Parse as local midnight — new Date('YYYY-MM-DD') is UTC midnight (wrong in PKT)
+      let nextDate = new Date(rule.next_date + 'T00:00:00');
       nextDate.setHours(0, 0, 0, 0);
 
       // Generate instances for all overdue dates

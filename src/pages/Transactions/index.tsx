@@ -220,7 +220,13 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
       setError('');
       try {
         const amount = Number(values.amount);
-        const sourceAccount = accounts.find(a => a.id === values.account_id);
+
+        // Fetch fresh account data at submit time — avoids stale React state
+        const accountIds = [values.account_id, values.to_account_id].filter(Boolean) as string[];
+        const { data: freshAccs } = await supabase
+          .from('accounts').select('id, type, balance').in('id', accountIds);
+        const sourceAccount = freshAccs?.find(a => a.id === values.account_id);
+        if (!sourceAccount) throw new Error('Account not found — please try again');
 
         // Insert transaction
         const { data: tx, error: txError } = await supabase.from('transactions').insert({
@@ -240,19 +246,19 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
         const isCreditCard = sourceAccount?.type === 'credit_card';
         if (['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(values.type)) {
           // Credit card: outstanding increases. Bank/cash: balance decreases.
-          const newBal = isCreditCard ? sourceAccount!.balance + amount : sourceAccount!.balance - amount;
+          const newBal = isCreditCard ? sourceAccount.balance + amount : sourceAccount.balance - amount;
           await supabase.from('accounts').update({ balance: newBal }).eq('id', values.account_id);
         } else if (['income', 'reimbursement_received', 'loan_received'].includes(values.type)) {
-          await supabase.from('accounts').update({ balance: (sourceAccount!.balance + amount) }).eq('id', values.account_id);
+          await supabase.from('accounts').update({ balance: (sourceAccount.balance + amount) }).eq('id', values.account_id);
         } else if (values.type === 'transfer') {
-          const destAccount = accounts.find(a => a.id === values.to_account_id);
-          await supabase.from('accounts').update({ balance: (sourceAccount!.balance - amount) }).eq('id', values.account_id);
-          await supabase.from('accounts').update({ balance: (destAccount!.balance + amount) }).eq('id', values.to_account_id);
+          const destAccount = freshAccs?.find(a => a.id === values.to_account_id);
+          await supabase.from('accounts').update({ balance: (sourceAccount.balance - amount) }).eq('id', values.account_id);
+          if (destAccount) await supabase.from('accounts').update({ balance: (destAccount.balance + amount) }).eq('id', values.to_account_id);
         } else if (values.type === 'atm_withdrawal') {
-          await supabase.from('accounts').update({ balance: (sourceAccount!.balance - amount) }).eq('id', values.account_id);
+          await supabase.from('accounts').update({ balance: (sourceAccount.balance - amount) }).eq('id', values.account_id);
           if (values.to_account_id) {
-            const cashAccount = accounts.find(a => a.id === values.to_account_id);
-            await supabase.from('accounts').update({ balance: (cashAccount!.balance + amount) }).eq('id', values.to_account_id);
+            const cashAccount = freshAccs?.find(a => a.id === values.to_account_id);
+            if (cashAccount) await supabase.from('accounts').update({ balance: (cashAccount.balance + amount) }).eq('id', values.to_account_id);
           }
         }
 
