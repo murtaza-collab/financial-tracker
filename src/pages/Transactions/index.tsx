@@ -60,8 +60,9 @@ const [recurringEnabled, setRecurringEnabled] = useState(false);
 const [recurringFrequency, setRecurringFrequency] = useState('monthly');
 const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocaleDateString('en-CA'));
 
-  // Family toggle
+  // On-behalf-of toggle (formerly "Not Mine / Family")
   const [isFamilyTx, setIsFamilyTx] = useState(false);
+  const [onBehalfPerson, setOnBehalfPerson] = useState('');
 
   document.title = 'Transactions | Finance Portal';
 
@@ -190,6 +191,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
   setRecurringFrequency('monthly');
   setRecurringStartDate(new Date().toLocaleDateString('en-CA'));
   setIsFamilyTx(false);
+  setOnBehalfPerson('');
   validation.resetForm();
 };
 
@@ -299,6 +301,30 @@ if (recurringEnabled) {
               share_amount: perPersonShare,
             }));
             await supabase.from('outing_participants').insert(participants);
+          }
+        }
+
+        // On-behalf-of: create outing with your_share=0 so full amount tracked for settlement
+        if (isFamilyTx && onBehalfPerson && values.type === 'expense') {
+          const { data: outing } = await supabase.from('outings').insert({
+            user_id: user?.id,
+            transaction_id: tx.id,
+            place_name: values.note || values.category || 'Card usage',
+            date: new Date(values.date).toLocaleDateString('en-CA'),
+            total_amount: amount,
+            paid_by: 'me',
+            total_people: 2,
+            your_share: 0,
+            notes: values.note || null,
+          }).select().single();
+
+          if (outing) {
+            await supabase.from('outing_participants').insert({
+              outing_id: outing.id,
+              user_id: user?.id,
+              person_id: onBehalfPerson,
+              share_amount: amount,
+            });
           }
         }
 
@@ -547,7 +573,7 @@ if (recurringEnabled) {
               />
             </FormGroup>
 
-            {/* Family Toggle — only for credit card expenses */}
+            {/* On-behalf-of toggle — credit card expenses only */}
             {txType === 'expense' && accounts.find(a => a.id === validation.values.account_id)?.type === 'credit_card' && (
               <div className="mt-2 mb-2">
                 <div className="form-check form-switch">
@@ -556,16 +582,37 @@ if (recurringEnabled) {
                     type="checkbox"
                     id="familyToggle"
                     checked={isFamilyTx}
-                    onChange={e => setIsFamilyTx(e.target.checked)}
+                    onChange={e => { setIsFamilyTx(e.target.checked); setOnBehalfPerson(''); }}
                   />
                   <label className="form-check-label fw-semibold" htmlFor="familyToggle">
-                    Not Mine (Family usage)
+                    Not mine — someone else used the card
                   </label>
                 </div>
                 {isFamilyTx && (
-                  <small className="text-muted d-block mt-1">
-                    Card balance will update, but this won't count toward your personal budget or spending.
-                  </small>
+                  <div className="mt-2 border rounded p-2 bg-light">
+                    <small className="text-muted d-block mb-2">
+                      Card balance updates, excluded from your budget. Pick a person to track repayment in Splits.
+                    </small>
+                    <Input
+                      type="select"
+                      value={onBehalfPerson}
+                      onChange={e => setOnBehalfPerson(e.target.value)}
+                      bsSize="sm"
+                    >
+                      <option value="">Who used the card? (optional)</option>
+                      {peopleList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </Input>
+                    {onBehalfPerson && (
+                      <small className="text-success d-block mt-1">
+                        Full amount will appear in {peopleList.find(p => p.id === onBehalfPerson)?.name}'s settlements.
+                      </small>
+                    )}
+                    {!onBehalfPerson && (
+                      <small className="text-muted d-block mt-1">
+                        No person selected — won't appear in splits. <a href="/splits">Add contacts first</a> if needed.
+                      </small>
+                    )}
+                  </div>
                 )}
               </div>
             )}

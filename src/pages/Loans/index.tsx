@@ -32,6 +32,8 @@ const Loans = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const [alreadyInBalance, setAlreadyInBalance] = useState(false);
+
   // Repayment form
   const [repayAmount, setRepayAmount] = useState('');
   const [repayAccount, setRepayAccount] = useState('');
@@ -88,35 +90,39 @@ useEffect(() => {
     validationSchema: Yup.object({
       person_name: Yup.string().required('Please enter person name'),
       principal: Yup.number().positive().required('Please enter amount'),
-      account_id: Yup.string().required('Please select account'),
     }),
     onSubmit: async (values) => {
+      if (!alreadyInBalance && !values.account_id) {
+        setError('Please select an account, or tick "Already in my balance"');
+        return;
+      }
       setSaving(true);
       setError('');
       try {
         const amount = Number(values.principal);
         const acc = accounts.find(a => a.id === values.account_id);
 
-        // Create transaction
-        await supabase.from('transactions').insert({
-          user_id: user?.id,
-          date: new Date(values.date).toISOString(),
-          amount,
-          type: values.direction === 'given' ? 'loan_given' : 'loan_received',
-          account_id: values.account_id,
-          category: values.direction === 'given' ? 'Loan Given' : 'Loan Received',
-          note: `${values.direction === 'given' ? 'Lent to' : 'Borrowed from'} ${values.person_name}`,
-        });
+        if (!alreadyInBalance) {
+          // Create transaction and adjust balance only for new money movement
+          await supabase.from('transactions').insert({
+            user_id: user?.id,
+            date: new Date(values.date).toISOString(),
+            amount,
+            type: values.direction === 'given' ? 'loan_given' : 'loan_received',
+            account_id: values.account_id,
+            category: values.direction === 'given' ? 'Loan Given' : 'Loan Received',
+            note: `${values.direction === 'given' ? 'Lent to' : 'Borrowed from'} ${values.person_name}`,
+          });
 
-        // Update account balance
-        if (acc) {
-          const newBalance = values.direction === 'given'
-            ? acc.balance - amount
-            : acc.balance + amount;
-          await supabase.from('accounts').update({ balance: newBalance }).eq('id', values.account_id);
+          if (acc) {
+            const newBalance = values.direction === 'given'
+              ? acc.balance - amount
+              : acc.balance + amount;
+            await supabase.from('accounts').update({ balance: newBalance }).eq('id', values.account_id);
+          }
         }
 
-        // Create loan record
+        // Create loan record (always)
         await supabase.from('loans').insert({
           user_id: user?.id,
           direction: values.direction,
@@ -124,13 +130,14 @@ useEffect(() => {
           principal: amount,
           date: values.date,
           due_date: values.due_date || null,
-          account_id: values.account_id,
+          account_id: values.account_id || null,
           outstanding: amount,
           status: 'active',
           notes: values.notes || null,
         });
 
         setModal(false);
+        setAlreadyInBalance(false);
         loanForm.resetForm();
         fetchData();
       } catch (err: any) {
@@ -439,18 +446,35 @@ useEffect(() => {
               <Input type="date" name="due_date" value={loanForm.values.due_date} onChange={loanForm.handleChange} />
               <small className="text-muted">Leave blank if no fixed date</small>
             </FormGroup>
-            <FormGroup>
-              <Label>{loanForm.values.direction === 'given' ? 'Paid From' : 'Received In'} <span className="text-danger">*</span></Label>
-              <Input
-                type="select" name="account_id"
-                value={loanForm.values.account_id}
-                onChange={loanForm.handleChange} onBlur={loanForm.handleBlur}
-                invalid={loanForm.touched.account_id && !!loanForm.errors.account_id}
-              >
-                <option value="">Select account...</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
-              </Input>
-            </FormGroup>
+            <div className="mb-3">
+              <div className="form-check form-switch mb-2">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="alreadyInBalanceToggle"
+                  checked={alreadyInBalance}
+                  onChange={e => { setAlreadyInBalance(e.target.checked); loanForm.setFieldValue('account_id', ''); }}
+                />
+                <label className="form-check-label fw-semibold fs-13" htmlFor="alreadyInBalanceToggle">
+                  Already in my balance — just track the loan
+                </label>
+              </div>
+              {alreadyInBalance ? (
+                <small className="text-muted">Only the loan record will be created. No balance or transaction changes.</small>
+              ) : (
+                <FormGroup className="mb-0">
+                  <Label>{loanForm.values.direction === 'given' ? 'Paid From' : 'Received In'} <span className="text-danger">*</span></Label>
+                  <Input
+                    type="select" name="account_id"
+                    value={loanForm.values.account_id}
+                    onChange={loanForm.handleChange}
+                  >
+                    <option value="">Select account...</option>
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                  </Input>
+                </FormGroup>
+              )}
+            </div>
             <FormGroup>
               <Label>Notes</Label>
               <Input
