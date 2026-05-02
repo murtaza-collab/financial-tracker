@@ -350,7 +350,7 @@ if (recurringEnabled) {
     : accounts.filter(a => a.id !== validation.values.account_id);
 
   const totalIn = transactions.filter(t => ['income', 'reimbursement_received', 'loan_received'].includes(t.type)).reduce((s, t) => s + Number(t.amount), 0);
-  const totalOut = transactions.filter(t => ['expense', 'loan_given', 'emi_payment', 'atm_withdrawal', 'goal_contribution'].includes(t.type)).reduce((s, t) => s + Number(t.amount), 0);
+  const totalOut = transactions.filter(t => ['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(t.type)).reduce((s, t) => s + Number(t.amount), 0);
 
   return (
     <React.Fragment>

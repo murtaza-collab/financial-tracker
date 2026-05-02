@@ -67,17 +67,24 @@ const Recurring = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    const { data: accData } = await supabase
-      .from('accounts').select('id, name, type, balance')
-      .eq('user_id', user?.id).eq('is_archived', false);
 
-    const { data: rulesData } = await supabase
-      .from('recurring_rules')
-      .select('*, accounts!recurring_rules_account_id_fkey(name)')
-      .eq('user_id', user?.id)
-      .eq('is_active', true)
-      .order('next_date', { ascending: true });
+    const [{ data: accData }, { data: rulesData }] = await Promise.all([
+      supabase.from('accounts').select('id, name, type, balance')
+        .eq('user_id', user?.id).eq('is_archived', false),
+      supabase.from('recurring_rules')
+        .select('*, accounts!recurring_rules_account_id_fkey(name)')
+        .eq('user_id', user?.id).eq('is_active', true)
+        .order('next_date', { ascending: true }),
+    ]);
 
+    if (accData) setAccounts(accData);
+    if (rulesData) {
+      setRules(rulesData);
+      // Generate pending instances first, then fetch — so new instances are included
+      await generatePendingInstances(rulesData);
+    }
+
+    // Fetch instances after generation so newly created ones are included
     const { data: instancesData } = await supabase
       .from('recurring_instances')
       .select('*, recurring_rules(*, accounts!recurring_rules_account_id_fkey(name))')
@@ -85,12 +92,6 @@ const Recurring = () => {
       .eq('status', 'pending')
       .order('due_date', { ascending: true });
 
-    if (accData) setAccounts(accData);
-    if (rulesData) {
-      setRules(rulesData);
-      // Auto-generate pending instances for overdue rules
-      await generatePendingInstances(rulesData);
-    }
     if (instancesData) setInstances(instancesData);
     setLoading(false);
   };
