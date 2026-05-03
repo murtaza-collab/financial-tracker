@@ -70,7 +70,7 @@ const Dashboard = () => {
       { data: outingData },
       { data: settlementData },
     ] = await Promise.all([
-      supabase.from('accounts').select('*').eq('user_id', user?.id).eq('is_archived', false),
+      supabase.from('accounts').select('*').eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true }),
       supabase.from('transactions')
         .select('*, accounts!transactions_account_id_fkey(name)')
         .eq('user_id', user?.id)

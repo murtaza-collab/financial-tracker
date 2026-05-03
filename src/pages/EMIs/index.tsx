@@ -41,7 +41,7 @@ const EMIs = () => {
     setLoading(true);
     const { data: accData } = await supabase
       .from('accounts').select('id, name, type, balance')
-      .eq('user_id', user?.id).eq('is_archived', false);
+      .eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true });
 
     const { data: emiData } = await supabase
       .from('emis').select('*, accounts!emis_account_id_fkey(name)')

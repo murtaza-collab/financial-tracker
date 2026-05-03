@@ -37,7 +37,7 @@ const Goals = () => {
     setLoading(true);
     const { data: accData } = await supabase
       .from('accounts').select('id, name, type, balance')
-      .eq('user_id', user?.id).eq('is_archived', false);
+      .eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true });
 
     const { data: goalData } = await supabase
       .from('goals').select('*, accounts!goals_account_id_fkey(name)')

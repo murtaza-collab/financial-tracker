@@ -80,7 +80,7 @@ const Recurring = () => {
     setLoading(true);
     const [{ data: accData }, { data: rulesData }] = await Promise.all([
       supabase.from('accounts').select('id, name, type, balance')
-        .eq('user_id', user?.id).eq('is_archived', false),
+        .eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true }),
       supabase.from('recurring_rules')
         .select('*, accounts!recurring_rules_account_id_fkey(name)')
         .eq('user_id', user?.id).eq('is_active', true)

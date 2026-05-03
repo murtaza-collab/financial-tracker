@@ -71,7 +71,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
   const fetchAccounts = async () => {
     const { data } = await supabase
       .from('accounts').select('id, name, type, balance, credit_limit')
-      .eq('user_id', user?.id).eq('is_archived', false);
+      .eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true });
     if (data) {
       setAccounts(data);
       setCashAccounts(data.filter(a => a.type === 'cash' || a.type === 'custom_wallet'));

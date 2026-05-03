@@ -53,7 +53,7 @@ const Splits = () => {
       supabase.from('split_people').select('*').eq('user_id', user?.id).order('name'),
       supabase.from('outings').select('*, outing_participants(person_id, share_amount, split_people(name))').eq('user_id', user?.id).order('date', { ascending: false }),
       supabase.from('settlements').select('*, accounts!settlements_account_id_fkey(name)').eq('user_id', user?.id).order('date', { ascending: false }),
-      supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false),
+      supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true }),
     ]);
     if (peopleData) setPeople(peopleData);
     if (outingData) setOutings(outingData);

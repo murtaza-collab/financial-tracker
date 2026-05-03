@@ -93,7 +93,7 @@ const Accounts = () => {
       .select('*')
       .eq('user_id', user?.id)
       .eq('is_archived', false)
-      .order('created_at', { ascending: true });
+      .order('name', { ascending: true });
     if (!error && data) setAccounts(data);
     setLoading(false);
   };

@@ -86,8 +86,8 @@ const CreditCards = () => {
 
     // Fetch cards and bank accounts in parallel
     const [{ data: cardData }, { data: bankData }] = await Promise.all([
-      supabase.from('accounts').select('*').eq('user_id', user?.id).eq('type', 'credit_card').eq('is_archived', false),
-      supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false).in('type', ['bank_savings', 'bank_current']),
+      supabase.from('accounts').select('*').eq('user_id', user?.id).eq('type', 'credit_card').eq('is_archived', false).order('name', { ascending: true }),
+      supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false).in('type', ['bank_savings', 'bank_current']).order('name', { ascending: true }),
     ]);
 
     if (cardData) {
