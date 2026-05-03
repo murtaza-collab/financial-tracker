@@ -46,6 +46,7 @@ const CreditCards = () => {
   const [bills, setBills] = useState<Bill[]>([]);
   const [payments, setPayments] = useState<Record<string, BillPayment[]>>({});
   const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+  const [latestBillMonth, setLatestBillMonth] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(getMonthKey(new Date()));
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -148,15 +149,36 @@ const CreditCards = () => {
 
     if (bankData) setBankAccounts(bankData);
 
+    // Track latest bill month per card (to detect rolled-over old bills)
+    const { data: allBills } = await supabase
+      .from('bills').select('account_id, month').eq('user_id', user?.id);
+    const latestMap: Record<string, string> = {};
+    (allBills || []).forEach(b => {
+      if (!latestMap[b.account_id] || b.month > latestMap[b.account_id])
+        latestMap[b.account_id] = b.month;
+    });
+    setLatestBillMonth(latestMap);
+
     // Urgent bills — due within 5 days or overdue, not fully paid (all months)
+    // Fetch all unpaid bills, then keep only the most recent per card
+    // (older months are rolled into current outstanding — only latest matters)
     const in5Days = new Date(); in5Days.setDate(in5Days.getDate() + 5);
     const { data: urgentData } = await supabase
       .from('bills')
       .select('*, accounts(name)')
       .eq('user_id', user?.id)
       .neq('status', 'paid')
-      .lte('due_date', in5Days.toLocaleDateString('en-CA'));
-    setUrgentBills(urgentData || []);
+      .lte('due_date', in5Days.toLocaleDateString('en-CA'))
+      .order('due_date', { ascending: false });
+
+    // Deduplicate: one bill per card (most recent unpaid only)
+    const seen = new Set<string>();
+    const deduped = (urgentData || []).filter(b => {
+      if (seen.has(b.account_id)) return false;
+      seen.add(b.account_id);
+      return true;
+    });
+    setUrgentBills(deduped);
 
     setLoading(false);
   };
@@ -524,8 +546,14 @@ const CreditCards = () => {
               const remaining = Math.max(0, stmtAmt - totalPaid);
               const paidPct = stmtAmt > 0 ? Math.min(100, (totalPaid / stmtAmt) * 100) : 0;
 
+              // A bill is "rolled over" if it's pending/partial but a newer month's bill exists for this card
+              const isRolledOver = bill
+                && (bill.status === 'pending' || bill.status === 'partial')
+                && latestBillMonth[card.id]
+                && latestBillMonth[card.id] > selectedMonth;
+
               return (
-                <Card key={card.id} className="mb-4 border">
+                <Card key={card.id} className={`mb-4 border ${isRolledOver ? 'opacity-75' : ''}`}>
                   <CardHeader className="d-flex justify-content-between align-items-center">
                     <div className="d-flex align-items-center gap-3">
                       <div>
@@ -537,9 +565,15 @@ const CreditCards = () => {
                       <Button color="soft-info" size="sm" onClick={() => setReconCard(card)}>
                         <i className="ri-file-search-line me-1"></i>Reconcile
                       </Button>
-                      <Badge color={getStatusColor(bill?.status || 'pending')} pill className="fs-12 px-3 py-2">
-                        {bill?.status === 'paid' ? '✓ Fully Paid' : bill?.status === 'partial' ? '⟳ Partially Paid' : '○ Pending'}
-                      </Badge>
+                      {isRolledOver ? (
+                        <Badge color="secondary" pill className="fs-12 px-3 py-2" title="Unpaid balance carried into next billing cycle">
+                          ↪ Rolled Over
+                        </Badge>
+                      ) : (
+                        <Badge color={getStatusColor(bill?.status || 'pending')} pill className="fs-12 px-3 py-2">
+                          {bill?.status === 'paid' ? '✓ Fully Paid' : bill?.status === 'partial' ? '⟳ Partially Paid' : '○ Pending'}
+                        </Badge>
+                      )}
                     </div>
                   </CardHeader>
                   <CardBody>
