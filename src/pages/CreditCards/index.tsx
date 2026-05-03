@@ -48,6 +48,8 @@ const CreditCards = () => {
   const [bankAccounts, setBankAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(getMonthKey(new Date()));
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [urgentBills, setUrgentBills] = useState<any[]>([]);
 
   // Modals
   const [statementModal, setStatementModal] = useState(false);
@@ -145,10 +147,21 @@ const CreditCards = () => {
     }
 
     if (bankData) setBankAccounts(bankData);
+
+    // Urgent bills — due within 5 days or overdue, not fully paid (all months)
+    const in5Days = new Date(); in5Days.setDate(in5Days.getDate() + 5);
+    const { data: urgentData } = await supabase
+      .from('bills')
+      .select('*, accounts(name)')
+      .eq('user_id', user?.id)
+      .neq('status', 'paid')
+      .lte('due_date', in5Days.toLocaleDateString('en-CA'));
+    setUrgentBills(urgentData || []);
+
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, [selectedMonth]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchData(); setStatusFilter(null); }, [selectedMonth]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Open statement modal
   const openStatementModal = (bill: Bill) => {
@@ -353,6 +366,16 @@ const CreditCards = () => {
   const partialBills = bills.filter(b => b.status === 'partial').length;
   const pendingBills = bills.filter(b => b.status === 'pending').length;
 
+  const filteredCards = statusFilter
+    ? cards.filter(card => {
+        const bill = bills.find(b => b.account_id === card.id);
+        return (bill?.status || 'pending') === statusFilter;
+      })
+    : cards;
+
+  const toggleFilter = (status: string) =>
+    setStatusFilter(prev => (prev === status ? null : status));
+
   const getStatusColor = (status: string) => {
     if (status === 'paid') return 'success';
     if (status === 'partial') return 'warning';
@@ -364,6 +387,38 @@ const CreditCards = () => {
       <div className="page-content">
         <Container fluid>
           <BreadCrumb title="Credit Card Bills" pageTitle="Finance Portal" />
+
+          {/* Urgent due-date banner */}
+          {urgentBills.length > 0 && (
+            <div className="mb-4">
+              <div className="alert alert-warning border-warning p-3 mb-0">
+                <div className="d-flex align-items-center gap-2 mb-2">
+                  <i className="ri-alarm-warning-fill fs-16 text-warning"></i>
+                  <strong className="text-warning">Bills Due Soon</strong>
+                </div>
+                <div className="d-flex flex-wrap gap-2">
+                  {urgentBills.map(b => {
+                    const days = getDaysUntil(b.due_date);
+                    const rem = Math.max(0, (b.statement_amount || 0) - (b.total_paid || 0));
+                    const isOverdue = days < 0;
+                    return (
+                      <div key={b.id} className={`d-flex align-items-center gap-1 px-3 py-2 rounded border ${isOverdue ? 'bg-danger-subtle border-danger' : 'bg-warning-subtle border-warning'}`} style={{ fontSize: 12 }}>
+                        <i className={`ri-bank-card-line ${isOverdue ? 'text-danger' : 'text-warning'}`}></i>
+                        <strong>{b.accounts?.name}</strong>
+                        <span className="text-muted">•</span>
+                        <span className={isOverdue ? 'text-danger fw-semibold' : 'text-warning fw-semibold'}>
+                          {isOverdue ? `Overdue ${Math.abs(days)}d` : days === 0 ? 'Due today!' : `Due in ${days}d`}
+                        </span>
+                        {rem > 0 && <><span className="text-muted">•</span><span className="text-danger">{formatCurrency(rem)} left</span></>}
+                        <span className="text-muted">•</span>
+                        <Badge color={b.status === 'partial' ? 'warning' : 'danger'} pill className="fs-11">{b.status === 'partial' ? 'Partial' : 'Pending'}</Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
 
           <Row className="mb-4">
             <Col md={3}>
@@ -381,41 +436,41 @@ const CreditCards = () => {
                 </CardBody>
               </Card>
             </Col>
-            <Col md={3}>
-              <Card className="card-animate">
+            <Col md={3} style={{ cursor: 'pointer' }} onClick={() => toggleFilter('paid')}>
+              <Card className={`card-animate ${statusFilter === 'paid' ? 'border-success border-2' : ''}`}>
                 <CardBody>
                   <div className="d-flex justify-content-between">
                     <div>
-                      <p className="text-muted mb-1">Fully Paid</p>
+                      <p className="text-muted mb-1">Fully Paid {statusFilter === 'paid' && <Badge color="success" pill className="ms-1 fs-10">filter on</Badge>}</p>
                       <h4 className="text-success">{paidBills}</h4>
                     </div>
-                    <div className="avatar-sm"><span className="avatar-title bg-success-subtle rounded-circle fs-3"><i className="ri-checkbox-circle-line text-success"></i></span></div>
+                    <div className="avatar-sm"><span className={`avatar-title ${statusFilter === 'paid' ? 'bg-success' : 'bg-success-subtle'} rounded-circle fs-3`}><i className={`ri-checkbox-circle-line ${statusFilter === 'paid' ? 'text-white' : 'text-success'}`}></i></span></div>
                   </div>
                 </CardBody>
               </Card>
             </Col>
-            <Col md={3}>
-              <Card className="card-animate">
+            <Col md={3} style={{ cursor: 'pointer' }} onClick={() => toggleFilter('partial')}>
+              <Card className={`card-animate ${statusFilter === 'partial' ? 'border-warning border-2' : ''}`}>
                 <CardBody>
                   <div className="d-flex justify-content-between">
                     <div>
-                      <p className="text-muted mb-1">Partially Paid</p>
+                      <p className="text-muted mb-1">Partially Paid {statusFilter === 'partial' && <Badge color="warning" pill className="ms-1 fs-10">filter on</Badge>}</p>
                       <h4 className="text-warning">{partialBills}</h4>
                     </div>
-                    <div className="avatar-sm"><span className="avatar-title bg-warning-subtle rounded-circle fs-3"><i className="ri-time-line text-warning"></i></span></div>
+                    <div className="avatar-sm"><span className={`avatar-title ${statusFilter === 'partial' ? 'bg-warning' : 'bg-warning-subtle'} rounded-circle fs-3`}><i className={`ri-time-line ${statusFilter === 'partial' ? 'text-white' : 'text-warning'}`}></i></span></div>
                   </div>
                 </CardBody>
               </Card>
             </Col>
-            <Col md={3}>
-              <Card className="card-animate">
+            <Col md={3} style={{ cursor: 'pointer' }} onClick={() => toggleFilter('pending')}>
+              <Card className={`card-animate ${statusFilter === 'pending' ? 'border-danger border-2' : ''}`}>
                 <CardBody>
                   <div className="d-flex justify-content-between">
                     <div>
-                      <p className="text-muted mb-1">Pending</p>
+                      <p className="text-muted mb-1">Pending {statusFilter === 'pending' && <Badge color="danger" pill className="ms-1 fs-10">filter on</Badge>}</p>
                       <h4 className="text-danger">{pendingBills}</h4>
                     </div>
-                    <div className="avatar-sm"><span className="avatar-title bg-danger-subtle rounded-circle fs-3"><i className="ri-error-warning-line text-danger"></i></span></div>
+                    <div className="avatar-sm"><span className={`avatar-title ${statusFilter === 'pending' ? 'bg-danger' : 'bg-danger-subtle'} rounded-circle fs-3`}><i className={`ri-error-warning-line ${statusFilter === 'pending' ? 'text-white' : 'text-danger'}`}></i></span></div>
                   </div>
                 </CardBody>
               </Card>
@@ -443,7 +498,22 @@ const CreditCards = () => {
               <p className="text-muted mt-2">No credit cards added yet.</p>
             </CardBody></Card>
           ) : (
-            cards.map(card => {
+            <>
+            {statusFilter && (
+              <div className="d-flex align-items-center gap-2 mb-3">
+                <span className="text-muted fs-13">Showing:</span>
+                <Badge color={statusFilter === 'paid' ? 'success' : statusFilter === 'partial' ? 'warning' : 'danger'} className="px-3 py-2 fs-12">
+                  {statusFilter === 'paid' ? '✓ Fully Paid' : statusFilter === 'partial' ? '⟳ Partially Paid' : '○ Pending'}
+                </Badge>
+                <button className="btn btn-sm btn-ghost-secondary py-1 px-2 fs-12" onClick={() => setStatusFilter(null)}>
+                  <i className="ri-close-line me-1"></i>Clear filter
+                </button>
+              </div>
+            )}
+            {filteredCards.length === 0 && (
+              <Card><CardBody className="text-center py-4 text-muted">No bills match this filter.</CardBody></Card>
+            )}
+            {filteredCards.map(card => {
               const bill = bills.find(b => b.account_id === card.id);
               const billPayments = bill ? (payments[bill.id] || []) : [];
               const daysUntil = bill?.due_date ? getDaysUntil(bill.due_date) : null;
@@ -581,7 +651,8 @@ const CreditCards = () => {
                   </CardBody>
                 </Card>
               );
-            })
+            })}
+            </>
           )}
         </Container>
       </div>

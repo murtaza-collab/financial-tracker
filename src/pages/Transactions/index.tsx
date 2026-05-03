@@ -92,6 +92,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
       .select('*, accounts!transactions_account_id_fkey(name)')
       .eq('user_id', user?.id)
       .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(100);
     if (filterType) query = query.eq('type', filterType);
     if (filterAccount) query = query.eq('account_id', filterAccount);
