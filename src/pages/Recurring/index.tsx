@@ -78,16 +78,21 @@ const Recurring = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    const [{ data: accData }, { data: rulesData }] = await Promise.all([
+    const [{ data: accData }, { data: rulesData, error: rulesError }] = await Promise.all([
       supabase.from('accounts').select('id, name, type, balance')
         .eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true }),
       supabase.from('recurring_rules')
-        .select('*, accounts!recurring_rules_account_id_fkey(name)')
+        .select('*')
         .eq('user_id', user?.id).eq('is_active', true)
         .order('next_date', { ascending: true }),
     ]);
     if (accData) setAccounts(accData);
-    if (rulesData) setRules(rulesData);
+    if (rulesError) { console.error('recurring_rules fetch error:', rulesError); }
+    if (rulesData) {
+      // Attach account name from already-loaded accounts list
+      const accMap = Object.fromEntries((accData || []).map(a => [a.id, a]));
+      setRules(rulesData.map(r => ({ ...r, accounts: accMap[r.account_id] ? { name: accMap[r.account_id].name } : undefined })));
+    }
     setLoading(false);
   };
 
