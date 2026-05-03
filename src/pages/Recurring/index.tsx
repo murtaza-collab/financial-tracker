@@ -115,7 +115,7 @@ const Recurring = () => {
         : ruleFrequency === 'monthly' ? 30
         : Number(ruleIntervalDays);
 
-      await supabase.from('recurring_rules').insert({
+      const { error: insertError } = await supabase.from('recurring_rules').insert({
         user_id: user?.id,
         name: ruleName,
         amount: Number(ruleAmount),
@@ -129,6 +129,7 @@ const Recurring = () => {
         end_date: ruleEndDate || null,
         is_active: true,
       });
+      if (insertError) throw new Error(insertError.message);
 
       setModal(false);
       resetRuleForm();

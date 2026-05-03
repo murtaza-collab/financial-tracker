@@ -285,7 +285,7 @@ if (recurringEnabled) {
   const intervalDays = recurringFrequency === 'daily' ? 1
     : recurringFrequency === 'weekly' ? 7 : 30;
 
-  await supabase.from('recurring_rules').insert({
+  const { error: rrErr } = await supabase.from('recurring_rules').insert({
     user_id: user?.id,
     name: values.note || values.category || 'Recurring Transaction',
     amount,
@@ -298,6 +298,7 @@ if (recurringEnabled) {
     next_date: recurringStartDate,
     is_active: true,
   });
+  if (rrErr) console.error('Failed to create recurring rule:', rrErr.message);
 }
 
           if (outing) {
