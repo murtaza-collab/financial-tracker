@@ -405,6 +405,7 @@ const CreditCards = () => {
                       <div key={b.id} className={`d-flex align-items-center gap-1 px-3 py-2 rounded border ${isOverdue ? 'bg-danger-subtle border-danger' : 'bg-warning-subtle border-warning'}`} style={{ fontSize: 12 }}>
                         <i className={`ri-bank-card-line ${isOverdue ? 'text-danger' : 'text-warning'}`}></i>
                         <strong>{b.accounts?.name}</strong>
+                        <span className="text-muted fst-italic">({getMonthLabel(b.month)})</span>
                         <span className="text-muted">•</span>
                         <span className={isOverdue ? 'text-danger fw-semibold' : 'text-warning fw-semibold'}>
                           {isOverdue ? `Overdue ${Math.abs(days)}d` : days === 0 ? 'Due today!' : `Due in ${days}d`}
