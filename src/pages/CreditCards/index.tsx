@@ -546,8 +546,10 @@ const CreditCards = () => {
               const remaining = Math.max(0, stmtAmt - totalPaid);
               const paidPct = stmtAmt > 0 ? Math.min(100, (totalPaid / stmtAmt) * 100) : 0;
 
-              // A bill is "rolled over" if it's pending/partial but a newer month's bill exists for this card
+              // A bill is "rolled over" only if it had a real statement amount AND is pending/partial
+              // with a newer month's bill existing. Empty placeholder bills are NOT rolled over.
               const isRolledOver = bill
+                && (bill.statement_amount || 0) > 0
                 && (bill.status === 'pending' || bill.status === 'partial')
                 && latestBillMonth[card.id]
                 && latestBillMonth[card.id] > selectedMonth;
