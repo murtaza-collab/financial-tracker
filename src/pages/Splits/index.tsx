@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 
-interface Person { id: string; name: string; phone: string; notes: string; }
+interface Person { id: string; name: string; phone: string; notes: string; opening_balance: number; }
 interface Outing {
   id: string; place_name: string; date: string; total_amount: number;
   total_people: number; your_share: number; paid_by: string; notes: string;
@@ -38,6 +38,7 @@ const Splits = () => {
   const [personName, setPersonName] = useState('');
   const [personPhone, setPersonPhone] = useState('');
   const [personNotes, setPersonNotes] = useState('');
+  const [personOpeningBalance, setPersonOpeningBalance] = useState('');
 
   // Settlement form
   const [settleAmount, setSettleAmount] = useState('');
@@ -70,6 +71,7 @@ const Splits = () => {
     setPersonName(person?.name || '');
     setPersonPhone(person?.phone || '');
     setPersonNotes(person?.notes || '');
+    setPersonOpeningBalance(person?.opening_balance ? String(person.opening_balance) : '');
     setError('');
     setPersonModal(true);
   };
@@ -78,10 +80,16 @@ const Splits = () => {
     if (!personName) { setError('Please enter a name'); return; }
     setSaving(true);
     try {
+      const payload = {
+        name: personName,
+        phone: personPhone || null,
+        notes: personNotes || null,
+        opening_balance: Number(personOpeningBalance) || 0,
+      };
       if (editPerson) {
-        await supabase.from('split_people').update({ name: personName, phone: personPhone, notes: personNotes }).eq('id', editPerson.id);
+        await supabase.from('split_people').update(payload).eq('id', editPerson.id);
       } else {
-        await supabase.from('split_people').insert({ user_id: user?.id, name: personName, phone: personPhone, notes: personNotes });
+        await supabase.from('split_people').insert({ user_id: user?.id, ...payload });
       }
       setPersonModal(false);
       fetchData();
@@ -98,18 +106,21 @@ const Splits = () => {
 
   // Per-person calculations
   const getPersonTab = (personId: string) => {
+    const person = people.find(p => p.id === personId);
+    const openingBalance = Number(person?.opening_balance) || 0;
     const personOutings = outings.filter(o =>
       o.outing_participants.some(p => p.person_id === personId)
     );
-    const totalOwed = personOutings.reduce((sum, o) => {
+    const outingOwed = personOutings.reduce((sum, o) => {
       const participant = o.outing_participants.find(p => p.person_id === personId);
       return sum + (participant?.share_amount || 0);
     }, 0);
+    const totalOwed = openingBalance + outingOwed;
     const totalSettled = settlements
       .filter(s => s.person_id === personId)
       .reduce((sum, s) => sum + Number(s.amount), 0);
     const balance = totalOwed - totalSettled;
-    return { personOutings, totalOwed, totalSettled, balance };
+    return { personOutings, openingBalance, outingOwed, totalOwed, totalSettled, balance };
   };
 
   // Settlement
@@ -274,7 +285,7 @@ const Splits = () => {
                   ) : (
                     <Row>
                       {people.map(person => {
-                        const { personOutings, totalOwed, totalSettled, balance } = getPersonTab(person.id);
+                        const { personOutings, openingBalance, totalOwed, totalSettled, balance } = getPersonTab(person.id);
                         const pct = totalOwed > 0 ? Math.min(100, (totalSettled / totalOwed) * 100) : 100;
                         return (
                           <Col md={6} xl={4} key={person.id} className="mb-3">
@@ -303,6 +314,12 @@ const Splits = () => {
                                 </div>
 
                                 <div className="mb-2">
+                                  {openingBalance > 0 && (
+                                    <div className="d-flex justify-content-between mb-1">
+                                      <small className="text-muted">Previous balance</small>
+                                      <small className="fw-semibold text-warning">{formatCurrency(openingBalance)}</small>
+                                    </div>
+                                  )}
                                   <div className="d-flex justify-content-between mb-1">
                                     <small className="text-muted">Total Owed</small>
                                     <small className="fw-semibold">{formatCurrency(totalOwed)}</small>
@@ -409,6 +426,13 @@ const Splits = () => {
               <Label>Notes (optional)</Label>
               <Input value={personNotes} onChange={e => setPersonNotes(e.target.value)} placeholder="e.g. Office colleague" />
             </FormGroup>
+            <div className="border rounded p-3 bg-light">
+              <FormGroup className="mb-0">
+                <Label>Previous balance they owe you (PKR)</Label>
+                <Input type="number" value={personOpeningBalance} onChange={e => setPersonOpeningBalance(e.target.value)} placeholder="0" />
+                <small className="text-muted">Old debt from before you started tracking — no transaction created, balances unchanged.</small>
+              </FormGroup>
+            </div>
           </Form>
         </ModalBody>
         <ModalFooter>
