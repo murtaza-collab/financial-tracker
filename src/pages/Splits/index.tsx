@@ -183,12 +183,22 @@ const Splits = () => {
 
   // Generate summary text (WhatsApp ready)
   const generateSummary = (person: Person) => {
-    const { personOutings, totalOwed, totalSettled, balance } = getPersonTab(person.id);
+    const { personOutings, openingBalance, totalOwed, totalSettled, balance } = getPersonTab(person.id);
     let text = `*${person.name} - Outstanding Balance*\n\n`;
+    if (openingBalance > 0) {
+      text += `Previous balance - ${formatCurrency(openingBalance)}\n`;
+    }
     personOutings.forEach(o => {
       const participant = o.outing_participants.find(p => p.person_id === person.id);
       const share = participant?.share_amount || 0;
-      text += `${o.place_name} - ${formatCurrency(o.total_amount)}/${o.total_people} = ${formatCurrency(share)}\n`;
+      const isOnBehalf = o.your_share === 0;
+      if (isOnBehalf) {
+        // Fully paid on their behalf — no division, full amount is theirs
+        text += `${o.place_name} - ${formatCurrency(share)}\n`;
+      } else {
+        // Normal split — show breakdown
+        text += `${o.place_name} - ${formatCurrency(o.total_amount)}/${o.total_people} = ${formatCurrency(share)}\n`;
+      }
     });
     text += `\n*Total: ${formatCurrency(totalOwed)}*`;
     if (totalSettled > 0) text += `\nPaid: ${formatCurrency(totalSettled)}`;
