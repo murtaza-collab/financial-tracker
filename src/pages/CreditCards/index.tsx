@@ -73,6 +73,7 @@ const CreditCards = () => {
   const [payAccount, setPayAccount] = useState('');
   const [payDate, setPayDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [payNote, setPayNote] = useState('');
+  const [payByOther, setPayByOther] = useState(false);
 
   // Reconciliation
   const [reconCard, setReconCard] = useState<CreditCard | null>(null);
@@ -255,14 +256,19 @@ const CreditCards = () => {
     setPayAccount('');
     setPayDate(new Date().toLocaleDateString('en-CA'));
     setPayNote('');
+    setPayByOther(false);
     setError('');
     setPaymentModal(true);
   };
 
   // Log a payment
   const handleLogPayment = async () => {
-    if (!selectedBill || !payAccount || !payAmount || !payDate) {
+    if (!selectedBill || !payAmount || !payDate) {
       setError('Please fill all required fields');
+      return;
+    }
+    if (!payByOther && !payAccount) {
+      setError('Please select a bank account to pay from');
       return;
     }
     setSaving(true);
@@ -270,45 +276,59 @@ const CreditCards = () => {
     try {
       const amount = Number(payAmount);
 
-      const { data: freshBank } = await supabase
-        .from('accounts').select('balance').eq('id', payAccount).single();
       const { data: freshCard } = await supabase
         .from('accounts').select('balance, name').eq('id', selectedBill.account_id).single();
 
-      if (!freshBank || freshBank.balance < amount) {
-        setError('Insufficient balance in selected account');
-        setSaving(false);
-        return;
+      if (!payByOther) {
+        const { data: freshBank } = await supabase
+          .from('accounts').select('balance').eq('id', payAccount).single();
+
+        if (!freshBank || freshBank.balance < amount) {
+          setError('Insufficient balance in selected account');
+          setSaving(false);
+          return;
+        }
+
+        // Log bill payment record
+        await supabase.from('bill_payments').insert({
+          bill_id: selectedBill.id,
+          user_id: user?.id,
+          amount,
+          paid_date: payDate,
+          account_id: payAccount,
+          note: payNote || null,
+        });
+
+        // Create transaction
+        await supabase.from('transactions').insert({
+          user_id: user?.id,
+          date: new Date(payDate).toISOString(),
+          amount,
+          type: 'credit_card_payment',
+          account_id: payAccount,
+          to_account_id: selectedBill.account_id,
+          category: 'Credit Card Payment',
+          note: payNote || `${freshCard?.name} payment - ${getMonthLabel(selectedBill.month)}`,
+        });
+
+        // Debit bank account
+        await supabase.from('accounts')
+          .update({ balance: freshBank.balance - amount })
+          .eq('id', payAccount);
+      } else {
+        // Third-party payment — only log the payment record, no bank debit, no transaction
+        const noteWithMarker = `[ext] ${payNote || ''}`.trim();
+        await supabase.from('bill_payments').insert({
+          bill_id: selectedBill.id,
+          user_id: user?.id,
+          amount,
+          paid_date: payDate,
+          account_id: null,
+          note: noteWithMarker,
+        });
       }
 
-      // Log bill payment record
-      await supabase.from('bill_payments').insert({
-        bill_id: selectedBill.id,
-        user_id: user?.id,
-        amount,
-        paid_date: payDate,
-        account_id: payAccount,
-        note: payNote || null,
-      });
-
-      // Create transaction
-      await supabase.from('transactions').insert({
-        user_id: user?.id,
-        date: new Date(payDate).toISOString(),
-        amount,
-        type: 'credit_card_payment',
-        account_id: payAccount,
-        to_account_id: selectedBill.account_id,
-        category: 'Credit Card Payment',
-        note: payNote || `${freshCard?.name} payment - ${getMonthLabel(selectedBill.month)}`,
-      });
-
-      // Debit bank account
-      await supabase.from('accounts')
-        .update({ balance: freshBank.balance - amount })
-        .eq('id', payAccount);
-
-      // Reduce card outstanding
+      // Reduce card outstanding (always)
       const newCardBalance = Math.max(0, (freshCard?.balance || 0) - amount);
       await supabase.from('accounts')
         .update({ balance: newCardBalance })
@@ -345,12 +365,19 @@ const CreditCards = () => {
     try {
       const amount = Number(payment.amount);
 
-      // Reverse bank and card balances only for real payments (account_id = null means pre-existing, no balance touch)
-      if (payment.account_id) {
+      // Determine if this payment affected account balances
+      const isExternalPayment = !payment.account_id && payment.note?.startsWith('[ext]');
+      const isRealPayment = !!payment.account_id;
+
+      if (isRealPayment) {
+        // Reverse bank account debit
         const { data: freshBank } = await supabase.from('accounts').select('balance').eq('id', payment.account_id).single();
         if (freshBank) {
           await supabase.from('accounts').update({ balance: freshBank.balance + amount }).eq('id', payment.account_id);
         }
+      }
+      if (isRealPayment || isExternalPayment) {
+        // Reverse card outstanding reduction
         const { data: freshCard } = await supabase.from('accounts').select('balance').eq('id', bill.account_id).single();
         if (freshCard) {
           await supabase.from('accounts').update({ balance: freshCard.balance + amount }).eq('id', bill.account_id);
@@ -642,7 +669,7 @@ const CreditCards = () => {
                       <Col md={4}>
                         <div className="d-flex justify-content-between align-items-center mb-2">
                           <p className="text-muted mb-0 fs-12">Payments Made</p>
-                          {bill && bill.status !== 'paid' && (
+                          {bill && (
                             <Button color="success" size="sm" onClick={() => bill && openPaymentModal(bill)}>
                               <i className="ri-add-line me-1"></i> Add Payment
                             </Button>
@@ -663,7 +690,13 @@ const CreditCards = () => {
                                 {billPayments.map(p => (
                                   <tr key={p.id}>
                                     <td className="fs-12">{new Date(p.paid_date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short' })}</td>
-                                    <td className="fs-12 text-muted">{p.accounts?.name || <span className="text-muted fst-italic">pre-existing</span>}</td>
+                                    <td className="fs-12 text-muted">
+                                      {p.accounts?.name
+                                        ? p.accounts.name
+                                        : p.note?.startsWith('[ext]')
+                                          ? <span className="text-info fst-italic">Third-party</span>
+                                          : <span className="text-muted fst-italic">pre-existing</span>}
+                                    </td>
                                     <td className="fs-12 text-end text-success fw-semibold">{formatCurrency(p.amount)}</td>
                                     <td className="text-end">
                                       <button
@@ -821,18 +854,36 @@ const CreditCards = () => {
               <Label>Amount (PKR) <span className="text-danger">*</span></Label>
               <Input type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder="Amount paid" />
             </FormGroup>
-            <FormGroup>
-              <Label>Pay From <span className="text-danger">*</span></Label>
-              <Input type="select" value={payAccount} onChange={e => setPayAccount(e.target.value)}>
-                <option value="">Select bank account...</option>
-                {bankAccounts.map(a => (
-                  <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>
-                ))}
-              </Input>
+            <FormGroup check className="mb-3">
+              <Input
+                type="checkbox"
+                id="payByOtherCheck"
+                checked={payByOther}
+                onChange={e => { setPayByOther(e.target.checked); setPayAccount(''); }}
+              />
+              <Label check htmlFor="payByOtherCheck" className="ms-2">
+                Someone else paid directly to the card
+              </Label>
             </FormGroup>
+            {payByOther ? (
+              <div className="alert alert-info p-2 mb-3 fs-13">
+                <i className="ri-information-line me-1"></i>
+                Card outstanding will be reduced. Your bank accounts are not affected.
+              </div>
+            ) : (
+              <FormGroup>
+                <Label>Pay From <span className="text-danger">*</span></Label>
+                <Input type="select" value={payAccount} onChange={e => setPayAccount(e.target.value)}>
+                  <option value="">Select bank account...</option>
+                  {bankAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>
+                  ))}
+                </Input>
+              </FormGroup>
+            )}
             <FormGroup>
               <Label>Note</Label>
-              <Input type="text" value={payNote} onChange={e => setPayNote(e.target.value)} placeholder="e.g. Partial payment, minimum due..." />
+              <Input type="text" value={payNote} onChange={e => setPayNote(e.target.value)} placeholder="e.g. Paid by parent, partial payment..." />
             </FormGroup>
           </Form>
         </ModalBody>

@@ -49,6 +49,9 @@ const Transactions = () => {
   const [deleteModal, setDeleteModal] = useState(false);
   const [txToDelete, setTxToDelete] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const PAGE_SIZE = 25;
 
   // Split state
   const [splitEnabled, setSplitEnabled] = useState(false);
@@ -87,17 +90,20 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
 
   const fetchTransactions = async () => {
     setLoading(true);
+    const from = currentPage * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
     let query = supabase
       .from('transactions')
-      .select('*, accounts!transactions_account_id_fkey(name)')
+      .select('*, accounts!transactions_account_id_fkey(name)', { count: 'exact' })
       .eq('user_id', user?.id)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(100);
+      .range(from, to);
     if (filterType) query = query.eq('type', filterType);
     if (filterAccount) query = query.eq('account_id', filterAccount);
-    const { data } = await query;
+    const { data, count } = await query;
     if (data) setTransactions(data);
+    if (count !== null) setTotalCount(count);
     setLoading(false);
   };
 
@@ -106,7 +112,8 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
     fetchPeople();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { fetchTransactions(); }, [filterType, filterAccount]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setCurrentPage(0); }, [filterType, filterAccount]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchTransactions(); }, [filterType, filterAccount, currentPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDeleteClick = (tx: Transaction) => {
     setTxToDelete(tx);
@@ -135,8 +142,11 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
           : bal(tx.account_id) + amount;
         await supabase.from('accounts').update({ balance: reversed }).eq('id', tx.account_id);
       } else if (['income', 'reimbursement_received', 'loan_received'].includes(tx.type)) {
-        // These credited the source → subtract back
-        await supabase.from('accounts').update({ balance: bal(tx.account_id) - amount }).eq('id', tx.account_id);
+        // Credit card: income reduced outstanding, so restore by adding back. Bank/cash: add back.
+        const reversed = accType(tx.account_id) === 'credit_card'
+          ? bal(tx.account_id) + amount
+          : bal(tx.account_id) - amount;
+        await supabase.from('accounts').update({ balance: reversed }).eq('id', tx.account_id);
       } else if (tx.type === 'transfer' && tx.to_account_id) {
         await supabase.from('accounts').update({ balance: bal(tx.account_id) + amount }).eq('id', tx.account_id);
         await supabase.from('accounts').update({ balance: bal(tx.to_account_id) - amount }).eq('id', tx.to_account_id);
@@ -250,7 +260,9 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
           const newBal = isCreditCard ? sourceAccount.balance + amount : sourceAccount.balance - amount;
           await supabase.from('accounts').update({ balance: newBal }).eq('id', values.account_id);
         } else if (['income', 'reimbursement_received', 'loan_received'].includes(values.type)) {
-          await supabase.from('accounts').update({ balance: (sourceAccount.balance + amount) }).eq('id', values.account_id);
+          // Credit card: income reduces outstanding. Bank/cash: income increases balance.
+          const newBal = isCreditCard ? sourceAccount.balance - amount : sourceAccount.balance + amount;
+          await supabase.from('accounts').update({ balance: newBal }).eq('id', values.account_id);
         } else if (values.type === 'transfer') {
           const destAccount = freshAccs?.find(a => a.id === values.to_account_id);
           await supabase.from('accounts').update({ balance: (sourceAccount.balance - amount) }).eq('id', values.account_id);
@@ -399,7 +411,7 @@ if (recurringEnabled) {
                   <div className="d-flex justify-content-between">
                     <div>
                       <p className="text-muted mb-1">Total Transactions</p>
-                      <h4>{transactions.length}</h4>
+                      <h4>{totalCount || transactions.length}</h4>
                     </div>
                     <div className="avatar-sm"><span className="avatar-title bg-info-subtle rounded-circle fs-3"><i className="ri-exchange-line text-info"></i></span></div>
                   </div>
@@ -435,6 +447,7 @@ if (recurringEnabled) {
                   <Button color="success" onClick={toggleModal}>Add Transaction</Button>
                 </div>
               ) : (
+                <>
                 <div className="table-responsive">
                   <Table className="table-hover table-nowrap mb-0">
                     <thead className="table-light">
@@ -479,6 +492,22 @@ if (recurringEnabled) {
                     </tbody>
                   </Table>
                 </div>
+                {totalCount > PAGE_SIZE && (
+                  <div className="d-flex justify-content-between align-items-center pt-3 px-1">
+                    <small className="text-muted">
+                      Showing {currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, totalCount)} of {totalCount}
+                    </small>
+                    <div className="d-flex gap-2">
+                      <Button size="sm" color="light" disabled={currentPage === 0} onClick={() => setCurrentPage(p => p - 1)}>
+                        <i className="ri-arrow-left-s-line"></i> Prev
+                      </Button>
+                      <Button size="sm" color="light" disabled={(currentPage + 1) * PAGE_SIZE >= totalCount} onClick={() => setCurrentPage(p => p + 1)}>
+                        Next <i className="ri-arrow-right-s-line"></i>
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                </>
               )}
             </CardBody>
           </Card>
