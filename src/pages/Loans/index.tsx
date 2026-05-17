@@ -46,6 +46,7 @@ const Loans = () => {
   const [scheduleEditInstallment, setScheduleEditInstallment] = useState('');
   const [scheduleEditStartDate, setScheduleEditStartDate] = useState('');
   const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [deletingLoan, setDeletingLoan] = useState<string | null>(null);
 
   // Repayment form
   const [repayAmount, setRepayAmount] = useState('');
@@ -172,6 +173,20 @@ useEffect(() => {
     setScheduleEditInstallment(loan.monthly_installment ? String(loan.monthly_installment) : '');
     setScheduleEditStartDate(loan.repayment_start_date || '');
     setScheduleModal(true);
+  };
+
+  const handleDeleteLoan = async (loan: Loan) => {
+    if (!window.confirm(`Delete loan with ${loan.person_name}? Repayment records will also be removed. Linked transactions remain in your transaction history.`)) return;
+    setDeletingLoan(loan.id);
+    try {
+      await supabase.from('loan_repayments').delete().eq('loan_id', loan.id);
+      await supabase.from('loans').delete().eq('id', loan.id);
+      fetchData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete loan');
+    } finally {
+      setDeletingLoan(null);
+    }
   };
 
   const handleSaveSchedule = async () => {
@@ -509,7 +524,10 @@ useEffect(() => {
                                 </Button>
                               )}
                               <Button color="soft-secondary" size="sm" onClick={() => openScheduleModal(loan)} title="Edit repayment schedule">
-                                <i className="ri-calendar-schedule-line"></i>
+                                <i className="ri-calendar-2-line"></i>
+                              </Button>
+                              <Button color="soft-danger" size="sm" onClick={() => handleDeleteLoan(loan)} disabled={deletingLoan === loan.id} title="Delete loan">
+                                {deletingLoan === loan.id ? <Spinner size="sm" /> : <i className="ri-delete-bin-line"></i>}
                               </Button>
                             </div>
                           </CardBody>
