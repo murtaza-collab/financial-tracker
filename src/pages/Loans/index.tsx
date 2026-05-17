@@ -39,6 +39,7 @@ const Loans = () => {
   const [repayAccount, setRepayAccount] = useState('');
   const [repayDate, setRepayDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [repayNote, setRepayNote] = useState('');
+  const [repayAlreadyPaid, setRepayAlreadyPaid] = useState(false);
 
   document.title = 'Loans | Finance Portal';
 
@@ -154,49 +155,59 @@ useEffect(() => {
     setRepayAccount('');
     setRepayDate(new Date().toLocaleDateString('en-CA'));
     setRepayNote('');
+    setRepayAlreadyPaid(false);
     setError('');
     setRepayModal(true);
   };
 
   const handleRepayment = async () => {
-    if (!selectedLoan || !repayAmount || !repayAccount) {
+    if (!selectedLoan || !repayAmount) {
       setError('Please fill all required fields');
+      return;
+    }
+    if (!repayAlreadyPaid && !repayAccount) {
+      setError('Please select an account, or tick "Already paid"');
       return;
     }
     setSaving(true);
     setError('');
     try {
       const amount = Number(repayAmount);
-      const { data: freshAcc } = await supabase
-        .from('accounts').select('balance').eq('id', repayAccount).single();
+      let txId: string | null = null;
 
-      // Create transaction
-      const { data: tx } = await supabase.from('transactions').insert({
-        user_id: user?.id,
-        date: new Date(repayDate).toISOString(),
-        amount,
-        type: selectedLoan.direction === 'given' ? 'reimbursement_received' : 'expense',
-        account_id: repayAccount,
-        loan_id: selectedLoan.id,
-        category: 'Loan Repayment',
-        note: repayNote || `Repayment ${selectedLoan.direction === 'given' ? 'from' : 'to'} ${selectedLoan.person_name}`,
-      }).select().single();
+      if (!repayAlreadyPaid) {
+        const { data: freshAcc } = await supabase
+          .from('accounts').select('balance').eq('id', repayAccount).single();
 
-      // Update account balance
-      if (freshAcc) {
-        const newBalance = selectedLoan.direction === 'given'
-          ? freshAcc.balance + amount
-          : freshAcc.balance - amount;
-        await supabase.from('accounts').update({ balance: newBalance }).eq('id', repayAccount);
+        // Create transaction
+        const { data: tx } = await supabase.from('transactions').insert({
+          user_id: user?.id,
+          date: new Date(repayDate).toISOString(),
+          amount,
+          type: selectedLoan.direction === 'given' ? 'reimbursement_received' : 'expense',
+          account_id: repayAccount,
+          category: 'Loan Repayment',
+          note: repayNote || `Repayment ${selectedLoan.direction === 'given' ? 'from' : 'to'} ${selectedLoan.person_name}`,
+        }).select().single();
+        txId = tx?.id || null;
+
+        // Update account balance
+        if (freshAcc) {
+          const newBalance = selectedLoan.direction === 'given'
+            ? freshAcc.balance + amount
+            : freshAcc.balance - amount;
+          await supabase.from('accounts').update({ balance: newBalance }).eq('id', repayAccount);
+        }
       }
 
-      // Create repayment record
+      // Create repayment record (always)
       await supabase.from('loan_repayments').insert({
         loan_id: selectedLoan.id,
         user_id: user?.id,
         amount,
         date: repayDate,
-        transaction_id: tx?.id || null,
+        transaction_id: txId,
+        note: repayNote || null,
       });
 
       // Update loan outstanding
@@ -526,13 +537,31 @@ useEffect(() => {
               <Label>Amount (PKR) <span className="text-danger">*</span></Label>
               <Input type="number" value={repayAmount} onChange={e => setRepayAmount(e.target.value)} />
             </FormGroup>
-            <FormGroup>
-              <Label>{selectedLoan?.direction === 'given' ? 'Received In' : 'Paid From'} <span className="text-danger">*</span></Label>
-              <Input type="select" value={repayAccount} onChange={e => setRepayAccount(e.target.value)}>
-                <option value="">Select account...</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
-              </Input>
+            <FormGroup check className="mb-3">
+              <Input
+                type="checkbox"
+                id="repayAlreadyPaidCheck"
+                checked={repayAlreadyPaid}
+                onChange={e => { setRepayAlreadyPaid(e.target.checked); setRepayAccount(''); }}
+              />
+              <Label check htmlFor="repayAlreadyPaidCheck" className="ms-2">
+                Already paid — balance already reflects this
+              </Label>
             </FormGroup>
+            {repayAlreadyPaid ? (
+              <div className="alert alert-info p-2 mb-3 fs-13">
+                <i className="ri-information-line me-1"></i>
+                Outstanding will be reduced. No account balance changes.
+              </div>
+            ) : (
+              <FormGroup>
+                <Label>{selectedLoan?.direction === 'given' ? 'Received In' : 'Paid From'} <span className="text-danger">*</span></Label>
+                <Input type="select" value={repayAccount} onChange={e => setRepayAccount(e.target.value)}>
+                  <option value="">Select account...</option>
+                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                </Input>
+              </FormGroup>
+            )}
             <FormGroup>
               <Label>Note</Label>
               <Input type="text" value={repayNote} onChange={e => setRepayNote(e.target.value)} placeholder="e.g. Bank transfer, partial payment..." />
