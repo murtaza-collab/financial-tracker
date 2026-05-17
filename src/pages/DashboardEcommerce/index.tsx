@@ -69,6 +69,7 @@ const Dashboard = () => {
       { data: budgetData },
       { data: outingData },
       { data: settlementData },
+      { data: splitPeopleData },
     ] = await Promise.all([
       supabase.from('accounts').select('*').eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true }),
       supabase.from('transactions')
@@ -91,6 +92,7 @@ const Dashboard = () => {
       supabase.from('budget_rules').select('*').eq('user_id', user?.id).eq('month', MONTH_KEY()),
       supabase.from('outings').select('total_amount, your_share').eq('user_id', user?.id),
       supabase.from('settlements').select('amount').eq('user_id', user?.id),
+      supabase.from('split_people').select('opening_balance').eq('user_id', user?.id),
     ]);
 
     if (accData) setAccounts(accData);
@@ -101,9 +103,13 @@ const Dashboard = () => {
     if (goalData) setGoals(goalData);
     if (budgetData) setBudgets(budgetData);
 
-    const totalToRecover = (outingData || []).reduce(
+    const outingsToRecover = (outingData || []).reduce(
       (s: number, o: any) => s + ((o.total_amount || 0) - (o.your_share || 0)), 0
     );
+    const openingBalances = (splitPeopleData || []).reduce(
+      (s: number, p: any) => s + (Number(p.opening_balance) || 0), 0
+    );
+    const totalToRecover = outingsToRecover + openingBalances;
     const totalRecovered = (settlementData || []).reduce(
       (s: number, st: any) => s + Number(st.amount), 0
     );

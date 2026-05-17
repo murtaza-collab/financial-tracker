@@ -67,6 +67,9 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
   const [isFamilyTx, setIsFamilyTx] = useState(false);
   const [onBehalfPerson, setOnBehalfPerson] = useState('');
 
+  // Loan person name (shown when type is loan_given or loan_received)
+  const [loanPersonName, setLoanPersonName] = useState('');
+
   document.title = 'Transactions | Finance Portal';
 
   const categories = useCategories(user?.id);
@@ -203,6 +206,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
   setRecurringStartDate(new Date().toLocaleDateString('en-CA'));
   setIsFamilyTx(false);
   setOnBehalfPerson('');
+  setLoanPersonName('');
   validation.resetForm();
 };
 
@@ -273,6 +277,22 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
             const cashAccount = freshAccs?.find(a => a.id === values.to_account_id);
             if (cashAccount) await supabase.from('accounts').update({ balance: (cashAccount.balance + amount) }).eq('id', values.to_account_id);
           }
+        }
+
+        // Create loan record for loan_given / loan_received
+        if (['loan_given', 'loan_received'].includes(values.type)) {
+          await supabase.from('loans').insert({
+            user_id: user?.id,
+            direction: values.type === 'loan_given' ? 'given' : 'taken',
+            person_name: loanPersonName || 'Unknown',
+            principal: amount,
+            date: new Date(values.date).toLocaleDateString('en-CA'),
+            due_date: null,
+            account_id: values.account_id,
+            outstanding: amount,
+            status: 'active',
+            notes: values.note || null,
+          });
         }
 
         // Handle split
@@ -554,6 +574,18 @@ if (recurringEnabled) {
               </Input>
             </FormGroup>
 
+            {['loan_given', 'loan_received'].includes(txType) && (
+              <FormGroup>
+                <Label>Person Name <span className="text-danger">*</span></Label>
+                <Input
+                  type="text"
+                  placeholder={txType === 'loan_given' ? 'Who did you lend to?' : 'Who did you borrow from?'}
+                  value={loanPersonName}
+                  onChange={e => setLoanPersonName(e.target.value)}
+                />
+              </FormGroup>
+            )}
+
             <FormGroup>
               <Label>Account <span className="text-danger">*</span></Label>
               <Input
@@ -610,8 +642,8 @@ if (recurringEnabled) {
               />
             </FormGroup>
 
-            {/* On-behalf-of toggle — credit card expenses only */}
-            {txType === 'expense' && accounts.find(a => a.id === validation.values.account_id)?.type === 'credit_card' && (
+            {/* On-behalf-of toggle — all expense types */}
+            {txType === 'expense' && (
               <div className="mt-2 mb-2">
                 <div className="form-check form-switch">
                   <input
@@ -622,13 +654,17 @@ if (recurringEnabled) {
                     onChange={e => { setIsFamilyTx(e.target.checked); setOnBehalfPerson(''); }}
                   />
                   <label className="form-check-label fw-semibold" htmlFor="familyToggle">
-                    Not mine — someone else used the card
+                    {accounts.find(a => a.id === validation.values.account_id)?.type === 'credit_card'
+                      ? 'Not mine — someone else used the card'
+                      : 'I paid this for someone else'}
                   </label>
                 </div>
                 {isFamilyTx && (
                   <div className="mt-2 border rounded p-2 bg-light">
                     <small className="text-muted d-block mb-2">
-                      Card balance updates, excluded from your budget. Pick a person to track repayment in Splits.
+                      {accounts.find(a => a.id === validation.values.account_id)?.type === 'credit_card'
+                        ? 'Card balance updates, excluded from your budget. Pick a person to track repayment in Splits.'
+                        : 'Money leaves your account but is tracked as owed to you. Pick a person to recover from in Splits.'}
                     </small>
                     <Input
                       type="select"
