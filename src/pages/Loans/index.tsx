@@ -210,7 +210,7 @@ useEffect(() => {
     let num = 1;
     while ((!end || current <= end) && num <= 360) {
       const monthKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
-      const paid = loanRepayments.some(r => r.date.startsWith(monthKey));
+      const paid = loanRepayments.some(r => String(r.date).slice(0, 7) === monthKey);
       slots.push({
         num,
         date: new Date(current),
@@ -276,14 +276,14 @@ useEffect(() => {
       }
 
       // Create repayment record (always)
-      await supabase.from('loan_repayments').insert({
+      const { error: repayErr } = await supabase.from('loan_repayments').insert({
         loan_id: selectedLoan.id,
         user_id: user?.id,
         amount,
         date: repayDate,
         transaction_id: txId,
-        note: repayNote || null,
       });
+      if (repayErr) throw new Error(repayErr.message);
 
       // Update loan outstanding
       const newOutstanding = Math.max(0, selectedLoan.outstanding - amount);
