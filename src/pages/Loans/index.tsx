@@ -13,10 +13,15 @@ interface Loan {
   id: string; direction: string; person_name: string; principal: number;
   date: string; due_date: string; account_id: string; outstanding: number;
   status: string; notes: string;
+  monthly_installment?: number; repayment_start_date?: string;
 }
 interface LoanRepayment {
   id: string; loan_id: string; amount: number; date: string;
   transaction_id: string;
+}
+interface ScheduleSlot {
+  num: number; date: Date; amount: number;
+  status: 'paid' | 'overdue' | 'upcoming';
 }
 
 const Loans = () => {
@@ -33,6 +38,14 @@ const Loans = () => {
   const [error, setError] = useState('');
 
   const [alreadyInBalance, setAlreadyInBalance] = useState(false);
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [scheduleInstallment, setScheduleInstallment] = useState('');
+  const [scheduleStartDate, setScheduleStartDate] = useState('');
+  const [scheduleModal, setScheduleModal] = useState(false);
+  const [scheduleLoan, setScheduleLoan] = useState<Loan | null>(null);
+  const [scheduleEditInstallment, setScheduleEditInstallment] = useState('');
+  const [scheduleEditStartDate, setScheduleEditStartDate] = useState('');
+  const [scheduleSaving, setScheduleSaving] = useState(false);
 
   // Repayment form
   const [repayAmount, setRepayAmount] = useState('');
@@ -135,10 +148,15 @@ useEffect(() => {
           outstanding: amount,
           status: 'active',
           notes: values.notes || null,
+          monthly_installment: showScheduleForm && scheduleInstallment ? Number(scheduleInstallment) : null,
+          repayment_start_date: showScheduleForm && scheduleStartDate ? scheduleStartDate : null,
         });
 
         setModal(false);
         setAlreadyInBalance(false);
+        setShowScheduleForm(false);
+        setScheduleInstallment('');
+        setScheduleStartDate('');
         loanForm.resetForm();
         fetchData();
       } catch (err: any) {
@@ -149,11 +167,53 @@ useEffect(() => {
     }
   });
 
-  const openRepayModal = (loan: Loan) => {
+  const openScheduleModal = (loan: Loan) => {
+    setScheduleLoan(loan);
+    setScheduleEditInstallment(loan.monthly_installment ? String(loan.monthly_installment) : '');
+    setScheduleEditStartDate(loan.repayment_start_date || '');
+    setScheduleModal(true);
+  };
+
+  const handleSaveSchedule = async () => {
+    if (!scheduleLoan) return;
+    setScheduleSaving(true);
+    await supabase.from('loans').update({
+      monthly_installment: scheduleEditInstallment ? Number(scheduleEditInstallment) : null,
+      repayment_start_date: scheduleEditStartDate || null,
+    }).eq('id', scheduleLoan.id);
+    setScheduleModal(false);
+    setScheduleSaving(false);
+    fetchData();
+  };
+
+  const generateSchedule = (loan: Loan, loanRepayments: LoanRepayment[]): ScheduleSlot[] => {
+    if (!loan.monthly_installment || !loan.repayment_start_date) return [];
+    const slots: ScheduleSlot[] = [];
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const end = loan.due_date ? new Date(loan.due_date) : null;
+    let current = new Date(loan.repayment_start_date);
+    let num = 1;
+    while ((!end || current <= end) && num <= 360) {
+      const monthKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
+      const paid = loanRepayments.some(r => r.date.startsWith(monthKey));
+      slots.push({
+        num,
+        date: new Date(current),
+        amount: loan.monthly_installment!,
+        status: paid ? 'paid' : current < today ? 'overdue' : 'upcoming',
+      });
+      current = new Date(current);
+      current.setMonth(current.getMonth() + 1);
+      num++;
+    }
+    return slots;
+  };
+
+  const openRepayModal = (loan: Loan, prefillDate?: string, prefillAmount?: number) => {
     setSelectedLoan(loan);
-    setRepayAmount(String(loan.outstanding));
+    setRepayAmount(prefillAmount ? String(prefillAmount) : String(loan.outstanding));
     setRepayAccount('');
-    setRepayDate(new Date().toLocaleDateString('en-CA'));
+    setRepayDate(prefillDate || new Date().toLocaleDateString('en-CA'));
     setRepayNote('');
     setRepayAlreadyPaid(false);
     setError('');
@@ -373,31 +433,85 @@ useEffect(() => {
                               <p className="text-muted fs-12 mb-3">{loan.notes}</p>
                             )}
 
-                            {/* Repayment history */}
-                            {loanRepayments.length > 0 && (
-                              <div className="mb-3">
-                                <small className="text-muted d-block mb-1">Repayment History</small>
-                                <div className="table-responsive">
-                                  <Table size="sm" className="mb-0">
-                                    <tbody>
-                                      {loanRepayments.map(r => (
-                                        <tr key={r.id}>
-                                          <td className="fs-11">{new Date(r.date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short' })}</td>
-                                          <td className="fs-11 text-end text-success fw-semibold">{formatCurrency(r.amount)}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </Table>
-                                </div>
-                              </div>
-                            )}
+                            {/* Repayment schedule (if set up) */}
+                            {(() => {
+                              const schedule = generateSchedule(loan, loanRepayments);
+                              if (schedule.length > 0) {
+                                const overdueCount = schedule.filter(s => s.status === 'overdue').length;
+                                return (
+                                  <div className="mb-3">
+                                    <div className="d-flex justify-content-between align-items-center mb-1">
+                                      <small className="text-muted fw-semibold">Repayment Schedule</small>
+                                      {overdueCount > 0 && <Badge color="danger" pill className="fs-11">{overdueCount} overdue</Badge>}
+                                    </div>
+                                    <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                                      <Table size="sm" className="mb-0">
+                                        <tbody>
+                                          {schedule.map(slot => (
+                                            <tr key={slot.num}>
+                                              <td className="fs-11 text-muted" style={{ width: 24 }}>#{slot.num}</td>
+                                              <td className="fs-11">{slot.date.toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: '2-digit' })}</td>
+                                              <td className="fs-11 text-end fw-semibold">{formatCurrency(slot.amount)}</td>
+                                              <td className="text-center" style={{ width: 80 }}>
+                                                {slot.status === 'paid'
+                                                  ? <Badge color="success" pill className="fs-10">✓ Paid</Badge>
+                                                  : slot.status === 'overdue'
+                                                  ? <Badge color="danger" pill className="fs-10">Overdue</Badge>
+                                                  : <Badge color="light" pill className="fs-10 text-muted">Upcoming</Badge>}
+                                              </td>
+                                              <td style={{ width: 50 }}>
+                                                {slot.status !== 'paid' && loan.status !== 'fully_repaid' && (
+                                                  <button
+                                                    className="btn btn-sm btn-ghost-success p-0 px-1 fs-11"
+                                                    title="Log this payment"
+                                                    onClick={() => openRepayModal(loan, slot.date.toLocaleDateString('en-CA'), slot.amount)}
+                                                  >
+                                                    Log
+                                                  </button>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </Table>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              // Fallback: plain repayment history when no schedule
+                              if (loanRepayments.length > 0) {
+                                return (
+                                  <div className="mb-3">
+                                    <small className="text-muted d-block mb-1">Repayment History</small>
+                                    <div className="table-responsive">
+                                      <Table size="sm" className="mb-0">
+                                        <tbody>
+                                          {loanRepayments.map(r => (
+                                            <tr key={r.id}>
+                                              <td className="fs-11">{new Date(r.date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short' })}</td>
+                                              <td className="fs-11 text-end text-success fw-semibold">{formatCurrency(r.amount)}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </Table>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
 
-                            {loan.status !== 'fully_repaid' && (
-                              <Button color="success" size="sm" className="w-100" onClick={() => openRepayModal(loan)}>
-                                <i className="ri-money-dollar-circle-line me-1"></i>
-                                {activeTab === 'given' ? 'Log Repayment Received' : 'Log Repayment Made'}
+                            <div className="d-flex gap-2">
+                              {loan.status !== 'fully_repaid' && (
+                                <Button color="success" size="sm" className="flex-grow-1" onClick={() => openRepayModal(loan)}>
+                                  <i className="ri-money-dollar-circle-line me-1"></i>
+                                  {activeTab === 'given' ? 'Log Received' : 'Log Payment'}
+                                </Button>
+                              )}
+                              <Button color="soft-secondary" size="sm" onClick={() => openScheduleModal(loan)} title="Edit repayment schedule">
+                                <i className="ri-calendar-schedule-line"></i>
                               </Button>
-                            )}
+                            </div>
                           </CardBody>
                         </Card>
                       </Col>
@@ -494,6 +608,55 @@ useEffect(() => {
                 value={loanForm.values.notes} onChange={loanForm.handleChange}
               />
             </FormGroup>
+
+            <div className="mb-2">
+              <div className="form-check form-switch mb-2">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="scheduleToggle"
+                  checked={showScheduleForm}
+                  onChange={e => setShowScheduleForm(e.target.checked)}
+                />
+                <label className="form-check-label fw-semibold fs-13" htmlFor="scheduleToggle">
+                  Set up monthly repayment schedule
+                </label>
+              </div>
+              {showScheduleForm && (
+                <div className="border rounded p-3 bg-light">
+                  <Row>
+                    <Col md={6}>
+                      <FormGroup className="mb-2">
+                        <Label className="fs-13">Monthly Installment (PKR)</Label>
+                        <Input
+                          type="number"
+                          placeholder="e.g. 5000"
+                          value={scheduleInstallment}
+                          onChange={e => setScheduleInstallment(e.target.value)}
+                        />
+                      </FormGroup>
+                    </Col>
+                    <Col md={6}>
+                      <FormGroup className="mb-2">
+                        <Label className="fs-13">First Payment Date</Label>
+                        <Input
+                          type="date"
+                          value={scheduleStartDate}
+                          onChange={e => setScheduleStartDate(e.target.value)}
+                        />
+                      </FormGroup>
+                    </Col>
+                  </Row>
+                  {scheduleInstallment && scheduleStartDate && loanForm.values.due_date && (() => {
+                    const months = Math.round(
+                      (new Date(loanForm.values.due_date).getTime() - new Date(scheduleStartDate).getTime())
+                      / (1000 * 60 * 60 * 24 * 30)
+                    ) + 1;
+                    return <small className="text-muted">{months} payment(s) × {formatCurrency(Number(scheduleInstallment))}</small>;
+                  })()}
+                </div>
+              )}
+            </div>
           </Form>
         </ModalBody>
         <ModalFooter>
@@ -573,6 +736,64 @@ useEffect(() => {
           <Button color="success" onClick={handleRepayment} disabled={saving}>
             {saving && <Spinner size="sm" className="me-2" />}
             Log Repayment
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Schedule Edit Modal */}
+      <Modal isOpen={scheduleModal} toggle={() => setScheduleModal(false)} centered>
+        <ModalHeader toggle={() => setScheduleModal(false)}>
+          Repayment Schedule — {scheduleLoan?.person_name}
+        </ModalHeader>
+        <ModalBody>
+          <p className="text-muted fs-13 mb-3">
+            Set a monthly installment and first payment date. The schedule will show each month's status automatically.
+          </p>
+          <Row>
+            <Col md={6}>
+              <FormGroup>
+                <Label>Monthly Installment (PKR)</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g. 5000"
+                  value={scheduleEditInstallment}
+                  onChange={e => setScheduleEditInstallment(e.target.value)}
+                />
+              </FormGroup>
+            </Col>
+            <Col md={6}>
+              <FormGroup>
+                <Label>First Payment Date</Label>
+                <Input
+                  type="date"
+                  value={scheduleEditStartDate}
+                  onChange={e => setScheduleEditStartDate(e.target.value)}
+                />
+              </FormGroup>
+            </Col>
+          </Row>
+          {scheduleEditInstallment && scheduleEditStartDate && scheduleLoan?.due_date && (() => {
+            const months = Math.round(
+              (new Date(scheduleLoan.due_date).getTime() - new Date(scheduleEditStartDate).getTime())
+              / (1000 * 60 * 60 * 24 * 30)
+            ) + 1;
+            return (
+              <div className="alert alert-info p-2 fs-13">
+                {months} payment(s) × {formatCurrency(Number(scheduleEditInstallment))} = {formatCurrency(months * Number(scheduleEditInstallment))}
+              </div>
+            );
+          })()}
+          {(scheduleEditInstallment || scheduleEditStartDate) && (
+            <button className="btn btn-link btn-sm text-danger p-0" onClick={() => { setScheduleEditInstallment(''); setScheduleEditStartDate(''); }}>
+              Clear schedule
+            </button>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button color="light" onClick={() => setScheduleModal(false)}>Cancel</Button>
+          <Button color="primary" onClick={handleSaveSchedule} disabled={scheduleSaving}>
+            {scheduleSaving && <Spinner size="sm" className="me-2" />}
+            Save Schedule
           </Button>
         </ModalFooter>
       </Modal>
