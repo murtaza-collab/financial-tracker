@@ -45,7 +45,7 @@ const CreditCards = () => {
   const [cards, setCards] = useState<CreditCard[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
   const [payments, setPayments] = useState<Record<string, BillPayment[]>>({});
-  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+  const [payFromAccounts, setPayFromAccounts] = useState<any[]>([]);
   const [latestBillMonth, setLatestBillMonth] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(getMonthKey(new Date()));
@@ -91,7 +91,7 @@ const CreditCards = () => {
     // Fetch cards and bank accounts in parallel
     const [{ data: cardData }, { data: bankData }] = await Promise.all([
       supabase.from('accounts').select('*').eq('user_id', user?.id).eq('type', 'credit_card').eq('is_archived', false).order('name', { ascending: true }),
-      supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false).in('type', ['bank_savings', 'bank_current']).order('name', { ascending: true }),
+      supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false).in('type', ['bank_savings', 'bank_current', 'cash', 'custom_wallet', 'credit_card']).order('name', { ascending: true }),
     ]);
 
     if (cardData) {
@@ -148,7 +148,7 @@ const CreditCards = () => {
       }
     }
 
-    if (bankData) setBankAccounts(bankData);
+    if (bankData) setPayFromAccounts(bankData);
 
     // Track latest bill month per card (to detect rolled-over old bills)
     const { data: allBills } = await supabase
@@ -268,7 +268,7 @@ const CreditCards = () => {
       return;
     }
     if (!payByOther && !payAccount) {
-      setError('Please select a bank account to pay from');
+      setError('Please select an account to pay from');
       return;
     }
     setSaving(true);
@@ -280,10 +280,12 @@ const CreditCards = () => {
         .from('accounts').select('balance, name').eq('id', selectedBill.account_id).single();
 
       if (!payByOther) {
-        const { data: freshBank } = await supabase
-          .from('accounts').select('balance').eq('id', payAccount).single();
+        const { data: freshPayFrom } = await supabase
+          .from('accounts').select('balance, type').eq('id', payAccount).single();
 
-        if (!freshBank || freshBank.balance < amount) {
+        const isPayingWithCard = freshPayFrom?.type === 'credit_card';
+
+        if (!isPayingWithCard && (!freshPayFrom || freshPayFrom.balance < amount)) {
           setError('Insufficient balance in selected account');
           setSaving(false);
           return;
@@ -311,9 +313,12 @@ const CreditCards = () => {
           note: payNote || `${freshCard?.name} payment - ${getMonthLabel(selectedBill.month)}`,
         });
 
-        // Debit bank account
+        // Debit paying account (credit card outstanding increases, others decrease)
+        const newPayFromBalance = isPayingWithCard
+          ? (freshPayFrom.balance + amount)
+          : (freshPayFrom!.balance - amount);
         await supabase.from('accounts')
-          .update({ balance: freshBank.balance - amount })
+          .update({ balance: newPayFromBalance })
           .eq('id', payAccount);
       } else {
         // Third-party payment — only log the payment record, no bank debit, no transaction
@@ -370,10 +375,13 @@ const CreditCards = () => {
       const isRealPayment = !!payment.account_id;
 
       if (isRealPayment) {
-        // Reverse bank account debit
-        const { data: freshBank } = await supabase.from('accounts').select('balance').eq('id', payment.account_id).single();
-        if (freshBank) {
-          await supabase.from('accounts').update({ balance: freshBank.balance + amount }).eq('id', payment.account_id);
+        // Reverse paying account: credit cards decrease back, others increase back
+        const { data: freshPayFrom } = await supabase.from('accounts').select('balance, type').eq('id', payment.account_id).single();
+        if (freshPayFrom) {
+          const reversed = freshPayFrom.type === 'credit_card'
+            ? freshPayFrom.balance - amount
+            : freshPayFrom.balance + amount;
+          await supabase.from('accounts').update({ balance: reversed }).eq('id', payment.account_id);
         }
       }
       if (isRealPayment || isExternalPayment) {
@@ -874,10 +882,30 @@ const CreditCards = () => {
               <FormGroup>
                 <Label>Pay From <span className="text-danger">*</span></Label>
                 <Input type="select" value={payAccount} onChange={e => setPayAccount(e.target.value)}>
-                  <option value="">Select bank account...</option>
-                  {bankAccounts.map(a => (
-                    <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>
-                  ))}
+                  <option value="">Select account...</option>
+                  {(() => {
+                    const groups: Record<string, { label: string; accounts: any[] }> = {
+                      bank: { label: 'Bank Accounts', accounts: [] },
+                      wallet: { label: 'Cash & Wallets', accounts: [] },
+                      card: { label: 'Credit Cards', accounts: [] },
+                    };
+                    payFromAccounts
+                      .filter(a => a.id !== selectedBill?.account_id)
+                      .forEach(a => {
+                        if (a.type === 'bank_savings' || a.type === 'bank_current') groups.bank.accounts.push(a);
+                        else if (a.type === 'cash' || a.type === 'custom_wallet') groups.wallet.accounts.push(a);
+                        else if (a.type === 'credit_card') groups.card.accounts.push(a);
+                      });
+                    return Object.values(groups).filter(g => g.accounts.length > 0).map(g => (
+                      <optgroup key={g.label} label={g.label}>
+                        {g.accounts.map(a => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} — {a.type === 'credit_card' ? `Outstanding: ${formatCurrency(a.balance)}` : formatCurrency(a.balance)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ));
+                  })()}
                 </Input>
               </FormGroup>
             )}
