@@ -50,6 +50,7 @@ const Dashboard = () => {
   const [goals, setGoals]               = useState<Goal[]>([]);
   const [budgets, setBudgets]           = useState<BudgetRule[]>([]);
   const [splitsPending, setSplitsPending] = useState(0);
+  const [splitsYouOwe, setSplitsYouOwe] = useState(0);
   const [loading, setLoading]           = useState(true);
 
   document.title = 'Dashboard | Finance Portal';
@@ -90,30 +91,43 @@ const Dashboard = () => {
         .select('id, name, target_amount, current_amount')
         .eq('user_id', user?.id).eq('status', 'active'),
       supabase.from('budget_rules').select('*').eq('user_id', user?.id).eq('month', MONTH_KEY()),
-      supabase.from('outings').select('total_amount, your_share').eq('user_id', user?.id),
-      supabase.from('settlements').select('amount').eq('user_id', user?.id),
+      supabase.from('outings').select('total_amount, your_share, paid_by_person_id').eq('user_id', user?.id),
+      supabase.from('settlements').select('amount, direction').eq('user_id', user?.id),
       supabase.from('split_people').select('opening_balance').eq('user_id', user?.id),
     ]);
 
     if (accData) setAccounts(accData);
     if (txData)  setTransactions(txData);
-    if (billData) setBills(billData);
+    if (billData) {
+      const activeIds = new Set((accData || []).map(a => a.id));
+      setBills(billData.filter(b => activeIds.has(b.account_id)));
+    }
     if (loanData) setLoans(loanData);
     if (emiData)  setEmis((emiData as any[]).filter(e => e.status !== 'closed'));
     if (goalData) setGoals(goalData);
     if (budgetData) setBudgets(budgetData);
 
-    const outingsToRecover = (outingData || []).reduce(
-      (s: number, o: any) => s + ((o.total_amount || 0) - (o.your_share || 0)), 0
-    );
+    // Outings user paid → others owe user
+    const outingsToRecover = (outingData || [])
+      .filter((o: any) => !o.paid_by_person_id)
+      .reduce((s: number, o: any) => s + ((o.total_amount || 0) - (o.your_share || 0)), 0);
     const openingBalances = (splitPeopleData || []).reduce(
       (s: number, p: any) => s + (Number(p.opening_balance) || 0), 0
     );
     const totalToRecover = outingsToRecover + openingBalances;
-    const totalRecovered = (settlementData || []).reduce(
-      (s: number, st: any) => s + Number(st.amount), 0
-    );
+    const totalRecovered = (settlementData || [])
+      .filter((st: any) => !st.direction || st.direction === 'received')
+      .reduce((s: number, st: any) => s + Number(st.amount), 0);
     setSplitsPending(Math.max(0, totalToRecover - totalRecovered));
+
+    // Outings someone else paid → user owes them
+    const youOweGross = (outingData || [])
+      .filter((o: any) => !!o.paid_by_person_id)
+      .reduce((s: number, o: any) => s + (Number(o.your_share) || 0), 0);
+    const totalPaidOut = (settlementData || [])
+      .filter((st: any) => st.direction === 'paid')
+      .reduce((s: number, st: any) => s + Number(st.amount), 0);
+    setSplitsYouOwe(Math.max(0, youOweGross - totalPaidOut));
     setLoading(false);
   };
 
@@ -521,7 +535,7 @@ const Dashboard = () => {
                   <Link to="/splits" className="text-primary fs-12">View all</Link>
                 </CardHeader>
                 <CardBody>
-                  {splitsPending <= 0 ? (
+                  {splitsPending <= 0 && splitsYouOwe <= 0 ? (
                     <div className="text-center py-4">
                       <i className="ri-group-line fs-1 text-success"></i>
                       <p className="text-muted mt-2">All splits settled!</p>
@@ -531,7 +545,13 @@ const Dashboard = () => {
                       <i className="ri-group-line fs-1 text-warning"></i>
                       <p className="text-muted mt-2 mb-1">Pending recovery</p>
                       <h4 className="text-warning">{formatCurrency(splitsPending)}</h4>
-                      <Link to="/splits" className="btn btn-sm btn-soft-warning mt-2">
+                      {splitsYouOwe > 0 && (
+                        <p className="mb-2">
+                          <small className="text-muted">You owe: </small>
+                          <small className="text-danger fw-semibold">{formatCurrency(splitsYouOwe)}</small>
+                        </p>
+                      )}
+                      <Link to="/splits" className="btn btn-sm btn-soft-warning mt-1">
                         See who owes what
                       </Link>
                     </div>
