@@ -30,7 +30,15 @@ const NotificationDropdown = () => {
     const in7Days = new Date(today);
     in7Days.setDate(today.getDate() + 7);
 
-    // Check credit card bills due soon
+    // Check credit card bills due soon — only active (non-archived) cards
+    const { data: activeCards } = await supabase
+      .from('accounts')
+      .select('id')
+      .eq('user_id', user?.id)
+      .eq('type', 'credit_card')
+      .eq('is_archived', false);
+    const activeCardIds = new Set((activeCards || []).map(c => c.id));
+
     const { data: bills } = await supabase
       .from('bills')
       .select('*, accounts!bills_account_id_fkey(name)')
@@ -38,7 +46,7 @@ const NotificationDropdown = () => {
       .neq('status', 'paid')
       .not('due_date', 'is', null);
 
-    bills?.forEach(bill => {
+    bills?.filter(bill => activeCardIds.has(bill.account_id)).forEach(bill => {
       const dueDate = new Date(bill.due_date);
       const daysLeft = Math.ceil((dueDate.getTime() - today.getTime()) / 86400000);
       if (daysLeft < 0) {
