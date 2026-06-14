@@ -172,9 +172,10 @@ const CreditCards = () => {
       .lte('due_date', in5Days.toLocaleDateString('en-CA'))
       .order('due_date', { ascending: false });
 
-    // Deduplicate: one bill per card (most recent unpaid only)
+    // Only show urgent bills for active (non-archived) credit cards
+    const activeCardIds = new Set((cardData || []).map((c: any) => c.id));
     const seen = new Set<string>();
-    const deduped = (urgentData || []).filter(b => {
+    const deduped = (urgentData || []).filter(b => activeCardIds.has(b.account_id)).filter(b => {
       if (seen.has(b.account_id)) return false;
       seen.add(b.account_id);
       return true;
@@ -333,8 +334,8 @@ const CreditCards = () => {
         });
       }
 
-      // Reduce card outstanding (always)
-      const newCardBalance = Math.max(0, (freshCard?.balance || 0) - amount);
+      // Reduce card outstanding (allow negative = credit/overpaid balance)
+      const newCardBalance = (freshCard?.balance || 0) - amount;
       await supabase.from('accounts')
         .update({ balance: newCardBalance })
         .eq('id', selectedBill.account_id);
@@ -617,10 +618,10 @@ const CreditCards = () => {
                     <Row>
                       {/* Left — Card info */}
                       <Col md={4} className="border-end">
-                        <p className="text-muted mb-1 fs-12">Current Outstanding (Card Balance)</p>
-                        <h4 className="text-danger">{formatCurrency(card.balance)}</h4>
-                        <Progress value={utilization} color={utilization > 80 ? 'danger' : utilization > 60 ? 'warning' : 'success'} style={{ height: 6 }} className="mb-1" />
-                        <small className="text-muted">{utilization.toFixed(1)}% of {formatCurrency(card.credit_limit)} utilized</small>
+                        <p className="text-muted mb-1 fs-12">{card.balance < 0 ? 'Credit Balance (Overpaid)' : 'Current Outstanding (Card Balance)'}</p>
+                        <h4 className={card.balance < 0 ? 'text-success' : 'text-danger'}>{formatCurrency(Math.abs(card.balance))}{card.balance < 0 ? ' CR' : ''}</h4>
+                        <Progress value={Math.max(0, utilization)} color={utilization > 80 ? 'danger' : utilization > 60 ? 'warning' : 'success'} style={{ height: 6 }} className="mb-1" />
+                        <small className="text-muted">{Math.max(0, utilization).toFixed(1)}% of {formatCurrency(card.credit_limit)} utilized</small>
 
                         {daysUntil !== null && bill?.due_date && bill.status !== 'paid' && (
                           <div className={`mt-3 p-2 rounded bg-${daysUntil < 0 ? 'danger' : daysUntil <= 3 ? 'warning' : 'info'}-subtle`}>
