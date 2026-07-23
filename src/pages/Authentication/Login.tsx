@@ -135,10 +135,7 @@ const Login = () => {
                   </div>
 
                   <div className="mb-3">
-                    <div className="d-flex justify-content-between">
-                      <Label className="fw-semibold">Password</Label>
-                      <Link to="/forgot-password" className="text-primary fs-13">Forgot password?</Link>
-                    </div>
+                    <Label className="fw-semibold">Password</Label>
                     <div className="position-relative">
                       <Input
                         name="password" type={passwordShow ? "text" : "password"}
