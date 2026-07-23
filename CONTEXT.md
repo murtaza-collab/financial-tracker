@@ -1,7 +1,7 @@
 # Financial Tracker — Project Context
 
 > Living document. Update this file whenever significant work is done, new features are added, or decisions are made.  
-> Last updated: 2026-05-01 (session 2)
+> Last updated: 2026-07-23 (session 3)
 
 ---
 
@@ -47,8 +47,10 @@
 
 - **Project URL:** https://pcwxttlxwfdofeetddmt.supabase.co
 - **Client:** `src/lib/supabase.ts`
-- **Auth:** Email/password via `src/context/AuthContext.tsx`
-- **Tables:** `accounts`, `transactions`, `loans`, `loan_repayments`, `budget_rules`, `bills`, `split_people`, `custom_categories`
+- **Auth:** Email/password + Google OAuth via `src/context/AuthContext.tsx`
+- **Tables:** `accounts`, `transactions`, `loans`, `loan_repayments`, `budget_rules`, `bills`, `bill_payments`, `recurring_rules`, `recurring_instances`, `outings`, `outing_participants`, `settlements`, `goals`, `goal_contributions`, `emis`, `emi_payments`, `split_people`, `custom_categories`, `profiles`
+- **RPC:** `delete_own_account()` — SECURITY DEFINER, scoped to `auth.uid()`; wipes all user data + auth login. Source: `scripts/delete-account-function.sql` (run manually in SQL Editor — no migrations dir).
+- **Email/SMTP:** NOT configured — built-in service rate-limits and errors ("Error sending recovery email"). Forgot-password is hidden until SMTP (Resend/Brevo) is added.
 
 ---
 
@@ -288,6 +290,9 @@ File: `src/Layouts/LayoutMenuData.tsx`
 
 | Date | Item | Status |
 |------|------|--------|
+| 2026-07-23 | No SMTP configured — forgot-password disabled; set up Resend/Brevo before launch, then un-hide the link | ⚠️ Open |
+| 2026-07-23 | Supabase Site URL + Google redirect URIs point at `localhost:3000` — switch to real domain at launch | ⚠️ Open |
+| 2026-07-23 | 4 commits local, not yet pushed | ⚠️ Pending push |
 | 2026-05-01 | Notifications menu item + Settings header removed from sidebar | ✅ Committed (`2451f29`) |
 | — | Firebase configured but commented out | Intentional — Supabase is primary |
 | — | ~40 Velzon template page dirs in `src/pages/` (CRM, Crypto, Ecommerce, etc.) — none routed | Pending cleanup — see Backlog |
@@ -296,6 +301,15 @@ File: `src/Layouts/LayoutMenuData.tsx`
 ---
 
 ## Work Log
+
+### 2026-07-23 — Session 3 (uncommitted push: 4 commits local, not yet pushed)
+- **Self-service account deletion** (`8bb59d7`) — Profile page "Danger Zone" card + confirm modal requiring the user to type `DELETE`. Calls `delete_own_account()` RPC, signs out, redirects to `/login`. Requires the SQL function in `scripts/delete-account-function.sql` to be run once in Supabase (SECURITY DEFINER, scoped to `auth.uid()`, deletes all 19 tables + `auth.users`). **Confirmed working** (test user gone from `profiles` and `auth.users`).
+- **Google OAuth login** (`42b1b39`) — Added `signInWithGoogle()` to AuthContext + "Continue with Google" button on Login/Register. Chosen over SMTP because no email provider is configured. Google provider enabled in Supabase; redirect URI `https://pcwxttlxwfdofeetddmt.supabase.co/auth/v1/callback`. **Confirmed working** — Google user created, logged in, profiles row auto-created (a `handle_new_user` trigger exists).
+- **Hid Forgot Password link** (`1cf369e`) — Removed from Login form since no SMTP → "Error sending recovery email". Route still exists, just unlinked. Un-hide once SMTP is set up.
+- **Transactions category filter** (`01631a1`) — Added "All Categories" dropdown (from `useCategories`) beside the type/account filters; server-side `.eq('category', ...)`, combines with other filters.
+- **Helper scripts (untracked):** `scripts/delete-user.sql` (delete one user by email via SQL), `scripts/delete-account-function.sql` (the RPC).
+- **Verified (no code change):** credit-card bill payment does NOT double-count expenses. Bill payment is saved as `credit_card_payment` type, which Budget/Dashboard/Forecast all exclude from expense totals. Food-on-card expense counts once; the payment is a debt settlement.
+- **Password reset without SMTP:** for a forgotten account, reset directly in SQL Editor: `update auth.users set encrypted_password = crypt('NewPass', gen_salt('bf')) where email = '...'`.
 
 ### 2026-05-01 — Session 2
 - **Transaction delete with reversal** (`72c896f`) — Trash icon on every row; confirms via modal; reverses account balances, cleans linked `loan_repayments` (restores outstanding), `outing_participants` + `outings` (split links), then deletes the transaction
