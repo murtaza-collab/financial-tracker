@@ -46,6 +46,7 @@ const Transactions = () => {
   const [saving, setSaving] = useState(false);
   const [filterType, setFilterType] = useState('');
   const [filterAccount, setFilterAccount] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
   const [deleteModal, setDeleteModal] = useState(false);
   const [txToDelete, setTxToDelete] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -104,6 +105,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
       .range(from, to);
     if (filterType) query = query.eq('type', filterType);
     if (filterAccount) query = query.eq('account_id', filterAccount);
+    if (filterCategory) query = query.eq('category', filterCategory);
     const { data, count } = await query;
     if (data) setTransactions(data);
     if (count !== null) setTotalCount(count);
@@ -115,8 +117,8 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
     fetchPeople();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { setCurrentPage(0); }, [filterType, filterAccount]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchTransactions(); }, [filterType, filterAccount, currentPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setCurrentPage(0); }, [filterType, filterAccount, filterCategory]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchTransactions(); }, [filterType, filterAccount, filterCategory, currentPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDeleteClick = (tx: Transaction) => {
     setTxToDelete(tx);
@@ -451,6 +453,10 @@ if (recurringEnabled) {
                 <Input type="select" style={{ width: 160 }} value={filterAccount} onChange={e => setFilterAccount(e.target.value)}>
                   <option value="">All Accounts</option>
                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </Input>
+                <Input type="select" style={{ width: 160 }} value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+                  <option value="">All Categories</option>
+                  {categories.map((c: string) => <option key={c} value={c}>{c}</option>)}
                 </Input>
                 <Button color="success" onClick={toggleModal}>
                   <i className="ri-add-line me-1"></i> Add Transaction
