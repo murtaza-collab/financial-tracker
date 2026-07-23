@@ -7,9 +7,10 @@ import { useAuth } from "../../context/AuthContext";
 
 const Login = () => {
   const navigate = useNavigate();
-  const { signIn } = useAuth();
+  const { signIn, signInWithGoogle } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [passwordShow, setPasswordShow] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
@@ -23,6 +24,18 @@ const Login = () => {
       setRememberMe(true);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleGoogle = async () => {
+    setGoogleLoading(true);
+    setError('');
+    try {
+      await signInWithGoogle();
+      // Browser redirects to Google, then back to /dashboard — no navigate needed.
+    } catch (err: any) {
+      setError(err.message || 'Google sign-in failed');
+      setGoogleLoading(false);
+    }
+  };
 
   const validation = useFormik({
     initialValues: { email: '', password: '' },
@@ -173,6 +186,24 @@ const Login = () => {
                     Sign In
                   </Button>
                 </Form>
+
+                <div className="d-flex align-items-center my-4">
+                  <div className="flex-grow-1" style={{ height: 1, background: '#e9ebec' }} />
+                  <span className="px-3 text-muted fs-13">OR</span>
+                  <div className="flex-grow-1" style={{ height: 1, background: '#e9ebec' }} />
+                </div>
+
+                <Button
+                  color="light" onClick={handleGoogle} disabled={googleLoading || loading}
+                  className="w-100 fw-semibold d-flex align-items-center justify-content-center gap-2"
+                  style={{ borderRadius: 10, padding: '11px', fontSize: 15, border: '1px solid #ced4da' }}
+                  type="button"
+                >
+                  {googleLoading
+                    ? <Spinner size="sm" />
+                    : <i className="ri-google-fill" style={{ fontSize: 18, color: '#EA4335' }}></i>}
+                  Continue with Google
+                </Button>
 
                 <div className="mt-4 text-center">
                   <p className="text-muted mb-0">
