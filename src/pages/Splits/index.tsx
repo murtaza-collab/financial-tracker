@@ -185,20 +185,20 @@ const Splits = () => {
     setSaving(true);
     try {
       const payload = { name: personName, phone: personPhone || null, email: trimmedEmail || null, notes: personNotes || null, opening_balance: Number(personOpeningBalance) || 0 };
-      if (editPerson) {
-        await supabase.from('split_people').update(payload).eq('id', editPerson.id);
-      } else {
-        await supabase.from('split_people').insert({ user_id: user?.id, ...payload });
-      }
+      const { error: saveErr } = editPerson
+        ? await supabase.from('split_people').update(payload).eq('id', editPerson.id)
+        : await supabase.from('split_people').insert({ user_id: user?.id, ...payload });
+      if (saveErr) throw new Error(saveErr.message);
       setPersonModal(false);
       fetchData();
-    } catch (err: any) { setError(err.message); }
+    } catch (err: any) { setError(err.message || 'Could not save. Please try again.'); }
     finally { setSaving(false); }
   };
 
   const handleDeletePerson = async (id: string) => {
     if (window.confirm('Delete this person? Their outing history will be kept.')) {
-      await supabase.from('split_people').delete().eq('id', id);
+      const { error: delErr } = await supabase.from('split_people').delete().eq('id', id);
+      if (delErr) { alert(delErr.message); return; }
       fetchData();
     }
   };
