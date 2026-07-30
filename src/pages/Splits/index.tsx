@@ -280,6 +280,7 @@ const Splits = () => {
       if (outingParticipants.length > 0) {
         const rows = outingParticipants.map(personId => ({
           outing_id: newOuting.id,
+          user_id: user?.id,
           person_id: personId,
           share_amount: sharePerPerson,
         }));
