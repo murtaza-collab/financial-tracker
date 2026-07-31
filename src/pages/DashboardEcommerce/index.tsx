@@ -85,8 +85,8 @@ const Dashboard = () => {
         .select('id, direction, person_name, outstanding')
         .eq('user_id', user?.id).eq('status', 'active'),
       supabase.from('emis')
-        .select('id, loan_name, emi_amount, tenure_months, paid_count, status')
-        .eq('user_id', user?.id),
+        .select('id, loan_name, emi_amount, tenure_months, paid_count, is_active')
+        .eq('user_id', user?.id).eq('is_active', true),
       supabase.from('goals')
         .select('id, name, target_amount, current_amount')
         .eq('user_id', user?.id).eq('status', 'active'),
@@ -103,7 +103,7 @@ const Dashboard = () => {
       setBills(billData.filter(b => activeIds.has(b.account_id)));
     }
     if (loanData) setLoans(loanData);
-    if (emiData)  setEmis((emiData as any[]).filter(e => e.status !== 'closed'));
+    if (emiData)  setEmis(emiData as any[]);
     if (goalData) setGoals(goalData);
     if (budgetData) setBudgets(budgetData);
 
