@@ -9,10 +9,12 @@ import BreadCrumb from '../../Components/Common/BreadCrumb';
 import { useLocation } from 'react-router-dom';
 
 interface Account { id: string; name: string; type: string; balance: number; }
+interface SplitPerson { id: string; name: string; }
 interface Loan {
   id: string; direction: string; person_name: string; principal: number;
   date: string; due_date: string; account_id: string; outstanding: number;
   status: string; notes: string;
+  person_id: string | null;
   monthly_installment?: number; repayment_start_date?: string;
 }
 interface LoanRepayment {
@@ -29,6 +31,9 @@ const Loans = () => {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [repayments, setRepayments] = useState<Record<string, LoanRepayment[]>>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [people, setPeople] = useState<SplitPerson[]>([]);
+  // true = user is typing a one-off name instead of picking a Splits contact
+  const [otherPerson, setOtherPerson] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('given');
   const [modal, setModal] = useState(false);
@@ -74,7 +79,12 @@ useEffect(() => {
       .eq('user_id', user?.id)
       .order('date', { ascending: false });
 
+    const { data: peopleData } = await supabase
+      .from('split_people').select('id, name')
+      .eq('user_id', user?.id).order('name');
+
     if (accData) setAccounts(accData);
+    if (peopleData) setPeople(peopleData);
     if (loanData) {
       setLoans(loanData);
       const repayMap: Record<string, LoanRepayment[]> = {};
@@ -96,6 +106,7 @@ useEffect(() => {
     initialValues: {
       direction: 'given',
       person_name: '',
+      person_id: '',
       principal: '',
       date: new Date().toLocaleDateString('en-CA'),
       due_date: '',
@@ -103,7 +114,7 @@ useEffect(() => {
       notes: '',
     },
     validationSchema: Yup.object({
-      person_name: Yup.string().required('Please enter person name'),
+      person_name: Yup.string().trim().required('Please pick or enter a person'),
       principal: Yup.number().positive().required('Please enter amount'),
     }),
     onSubmit: async (values) => {
@@ -141,7 +152,8 @@ useEffect(() => {
         await supabase.from('loans').insert({
           user_id: user?.id,
           direction: values.direction,
-          person_name: values.person_name,
+          person_name: values.person_name.trim(),
+          person_id: values.person_id || null,
           principal: amount,
           date: values.date,
           due_date: values.due_date || null,
@@ -155,6 +167,7 @@ useEffect(() => {
 
         setModal(false);
         setAlreadyInBalance(false);
+        setOtherPerson(false);
         setShowScheduleForm(false);
         setScheduleInstallment('');
         setScheduleStartDate('');
@@ -167,6 +180,35 @@ useEffect(() => {
       }
     }
   });
+
+  const openLoanModal = () => {
+    loanForm.resetForm();
+    setAlreadyInBalance(false);
+    // With no Splits contacts yet there is nothing to pick, so go straight to free text
+    setOtherPerson(people.length === 0);
+    setError('');
+    setModal(true);
+  };
+
+  const closeLoanModal = () => {
+    setModal(false);
+    setOtherPerson(false);
+    loanForm.resetForm();
+  };
+
+  // Picking a contact fills person_name from it so the rest of the app (notes,
+  // cards, summaries) keeps reading a plain name.
+  const handlePersonSelect = (value: string) => {
+    if (value === '__other__') {
+      setOtherPerson(true);
+      loanForm.setFieldValue('person_id', '');
+      loanForm.setFieldValue('person_name', '');
+    } else {
+      setOtherPerson(false);
+      loanForm.setFieldValue('person_id', value);
+      loanForm.setFieldValue('person_name', people.find(p => p.id === value)?.name || '');
+    }
+  };
 
   const openScheduleModal = (loan: Loan) => {
     setScheduleLoan(loan);
@@ -356,7 +398,7 @@ useEffect(() => {
               </Card>
             </Col>
             <Col md={4} className="d-flex align-items-center">
-              <Button color="success" className="w-100" onClick={() => setModal(true)}>
+              <Button color="success" className="w-100" onClick={openLoanModal}>
                 <i className="ri-add-line me-2"></i> Add Loan
               </Button>
             </Col>
@@ -407,7 +449,14 @@ useEffect(() => {
                                   </span>
                                 </div>
                                 <div>
-                                  <h6 className="mb-0">{loan.person_name}</h6>
+                                  <h6 className="mb-0">
+                                    {loan.person_name}
+                                    {loan.person_id && (
+                                      <Badge color="soft-primary" className="text-primary fs-11 ms-1" title="Linked to a Splits contact — included in their net balance and settled together.">
+                                        <i className="ri-link me-1"></i>Splits
+                                      </Badge>
+                                    )}
+                                  </h6>
                                   <small className="text-muted">{new Date(loan.date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}</small>
                                 </div>
                               </div>
@@ -543,8 +592,8 @@ useEffect(() => {
       </div>
 
       {/* Add Loan Modal */}
-      <Modal isOpen={modal} toggle={() => { setModal(false); loanForm.resetForm(); }} centered size="md">
-        <ModalHeader toggle={() => { setModal(false); loanForm.resetForm(); }}>Add Loan</ModalHeader>
+      <Modal isOpen={modal} toggle={closeLoanModal} centered size="md">
+        <ModalHeader toggle={closeLoanModal}>Add Loan</ModalHeader>
         <ModalBody>
           {error && <Alert color="danger">{error}</Alert>}
           <Form>
@@ -558,12 +607,37 @@ useEffect(() => {
             <FormGroup>
               <Label>{loanForm.values.direction === 'given' ? 'Lent To' : 'Borrowed From'} <span className="text-danger">*</span></Label>
               <Input
-                name="person_name"
-                placeholder="Person name"
-                value={loanForm.values.person_name}
-                onChange={loanForm.handleChange} onBlur={loanForm.handleBlur}
-                invalid={loanForm.touched.person_name && !!loanForm.errors.person_name}
-              />
+                type="select"
+                value={otherPerson ? '__other__' : loanForm.values.person_id}
+                onChange={e => handlePersonSelect(e.target.value)}
+              >
+                <option value="">Select person...</option>
+                {people.length > 0 && (
+                  <optgroup label="Splits contacts">
+                    {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </optgroup>
+                )}
+                <option value="__other__">Someone else — type a name…</option>
+              </Input>
+              {otherPerson && (
+                <Input
+                  className="mt-2"
+                  name="person_name"
+                  placeholder="Person name"
+                  value={loanForm.values.person_name}
+                  onChange={loanForm.handleChange} onBlur={loanForm.handleBlur}
+                  invalid={loanForm.touched.person_name && !!loanForm.errors.person_name}
+                />
+              )}
+              {loanForm.submitCount > 0 && !loanForm.values.person_name.trim() ? (
+                <small className="text-danger d-block">Please pick or enter a person</small>
+              ) : (
+                <small className="text-muted">
+                  {loanForm.values.person_id
+                    ? 'This loan will roll into their Splits balance and settle together.'
+                    : 'Pick a Splits contact to settle this loan together with their splits.'}
+                </small>
+              )}
             </FormGroup>
             <Row>
               <Col md={6}>

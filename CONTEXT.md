@@ -177,6 +177,9 @@ financial-tracker/
   user_id: string
   direction: 'given' | 'taken'
   person_name: string
+  person_id?: string      // FK -> split_people(id), ON DELETE SET NULL. When set,
+                          // the loan rolls into that contact's Splits net balance
+                          // and is settled together. Null = one-off person.
   principal: number
   date: date
   due_date?: date
@@ -301,6 +304,14 @@ File: `src/Layouts/LayoutMenuData.tsx`
 ---
 
 ## Work Log
+
+### 2026-08-08 — Session 4 (requires manual SQL: `scripts/add-loan-split-person.sql`)
+- **Loans ↔ Splits rollup** — A loan can now be attached to a Splits contact so both debts settle as one figure, instead of the loan being added by hand at settlement time.
+  - **Schema:** `loans.person_id` → `split_people(id)`, `ON DELETE SET NULL`, plus an index and a one-time backfill that links existing loans by exact (trimmed, case-insensitive) `person_name` match — skipping ambiguous names. Nullable, so one-off loans are unaffected.
+  - **Loans page** — "Lent To" / "Borrowed From" is now a Splits-contact dropdown with a "Someone else — type a name…" escape hatch. Picking a contact fills `person_name` from it, so every other screen keeps reading a plain name. Linked loans show a `Splits` badge.
+  - **Splits page** — `getPersonTab()` adds outstanding loans to the net balance (`given` = they owe you, `taken` = you owe them). Person cards, the settle modal, and the WhatsApp summary each show loans as their own line.
+  - **Settlement allocation** — `handleSettle()` clears outstanding loans first (oldest first), writes a `loan_repayments` row per loan and draws down `outstanding`; only the **remainder** becomes a `settlements` row. This is what stops double-counting: a 20,000 payment against 10,000 splits + 10,000 loan lands as one 20,000 transaction, a 10,000 repayment, and a 10,000 settlement — net balance 0. A "Clear outstanding loans first" toggle (default on) opts out, and the modal previews the split before saving.
+  - Loans are listed *outside* the `fifoUnpaid()` pool in the summary — their `outstanding` is already net of repayments, so the settlement pool must not consume them again.
 
 ### 2026-07-23 — Session 3 (uncommitted push: 4 commits local, not yet pushed)
 - **Self-service account deletion** (`8bb59d7`) — Profile page "Danger Zone" card + confirm modal requiring the user to type `DELETE`. Calls `delete_own_account()` RPC, signs out, redirects to `/login`. Requires the SQL function in `scripts/delete-account-function.sql` to be run once in Supabase (SECURITY DEFINER, scoped to `auth.uid()`, deletes all 19 tables + `auth.users`). **Confirmed working** (test user gone from `profiles` and `auth.users`).

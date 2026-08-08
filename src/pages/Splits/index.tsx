@@ -17,6 +17,11 @@ interface Settlement {
   direction?: string;
   accounts?: { name: string };
 }
+// Loans linked to a Splits contact — they roll into that person's net balance
+interface PersonLoan {
+  id: string; person_id: string; person_name: string; direction: string;
+  outstanding: number; date: string; status: string;
+}
 interface PendingInvite {
   person_id: string; creator_id: string; creator_name: string | null;
   creator_email: string | null; invited_as: string;
@@ -37,6 +42,7 @@ const Splits = () => {
   const [people, setPeople] = useState<Person[]>([]);
   const [outings, setOutings] = useState<Outing[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [personLoans, setPersonLoans] = useState<PersonLoan[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
@@ -59,6 +65,7 @@ const Splits = () => {
   const [settleDate, setSettleDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [settleNote, setSettleNote] = useState('');
   const [settleDirection, setSettleDirection] = useState<'received' | 'paid'>('received');
+  const [applyToLoans, setApplyToLoans] = useState(true);
 
   const [outingName, setOutingName] = useState('');
   const [outingDate, setOutingDate] = useState(new Date().toLocaleDateString('en-CA'));
@@ -81,16 +88,20 @@ const Splits = () => {
     // Phase 1: flag which of your contacts are real app users (matched by email).
     // Foundation only — this shares nothing; it just sets linked_user_id / link_status.
     await supabase.rpc('refresh_split_links');
-    const [{ data: peopleData }, { data: outingData }, { data: settlementData }, { data: accData }] = await Promise.all([
+    const [{ data: peopleData }, { data: outingData }, { data: settlementData }, { data: accData }, { data: loanData }] = await Promise.all([
       supabase.from('split_people').select('*').eq('user_id', user?.id).order('name'),
       supabase.from('outings').select('*, outing_participants(person_id, share_amount, split_people(name))').eq('user_id', user?.id).order('date', { ascending: false }),
       supabase.from('settlements').select('*, accounts!settlements_account_id_fkey(name)').eq('user_id', user?.id).order('date', { ascending: false }),
       supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true }),
+      // Only loans tied to a contact; oldest first so settlements clear them FIFO
+      supabase.from('loans').select('id, person_id, person_name, direction, outstanding, date, status')
+        .eq('user_id', user?.id).not('person_id', 'is', null).order('date', { ascending: true }),
     ]);
     if (peopleData) setPeople(peopleData);
     if (outingData) setOutings(outingData as Outing[]);
     if (settlementData) setSettlements(settlementData);
     if (accData) setAccounts(accData);
+    setPersonLoans((loanData as PersonLoan[]) || []);
     setLoading(false);
   };
 
@@ -203,6 +214,15 @@ const Splits = () => {
     }
   };
 
+  // Loans with this contact that still have money on them, oldest first.
+  const getOpenLoans = (personId: string, direction?: 'given' | 'taken') =>
+    personLoans.filter(l =>
+      l.person_id === personId &&
+      Number(l.outstanding) > 0 &&
+      l.status !== 'fully_repaid' &&
+      (!direction || l.direction === direction)
+    );
+
   const getPersonTab = (personId: string) => {
     const person = people.find(p => p.id === personId);
     const openingBalance = Number(person?.opening_balance) || 0;
@@ -228,10 +248,23 @@ const Splits = () => {
       .filter(s => s.direction === 'paid')
       .reduce((sum, s) => sum + Number(s.amount), 0);
 
-    // positive = they owe user; negative = user owes them
-    const balance = openingBalance + outingOwed - userOwesToPerson - receivedSettlements + paidSettlements;
+    // Loans linked to this contact. `outstanding` is already net of any repayments
+    // logged on the Loans page, so it never double-counts against settlements —
+    // handleSettle deducts the loan portion before writing the settlement row.
+    const openLoans = getOpenLoans(personId);
+    const loansGivenOut = openLoans.filter(l => l.direction === 'given')
+      .reduce((sum, l) => sum + Number(l.outstanding), 0);
+    const loansTakenOut = openLoans.filter(l => l.direction === 'taken')
+      .reduce((sum, l) => sum + Number(l.outstanding), 0);
 
-    return { personOutings, paidByPersonOutings, openingBalance, outingOwed, userOwesToPerson, receivedSettlements, paidSettlements, balance };
+    // positive = they owe user; negative = user owes them
+    const balance = openingBalance + outingOwed + loansGivenOut
+      - userOwesToPerson - loansTakenOut - receivedSettlements + paidSettlements;
+
+    return {
+      personOutings, paidByPersonOutings, openingBalance, outingOwed, userOwesToPerson,
+      receivedSettlements, paidSettlements, openLoans, loansGivenOut, loansTakenOut, balance,
+    };
   };
 
   const openOutingModal = () => {
@@ -297,6 +330,31 @@ const Splits = () => {
     }
   };
 
+  // Split a settlement across the person's outstanding loans (oldest first), and
+  // return what's left over for the split side. Keeping the two apart is what
+  // stops a loan-inclusive settlement from being counted twice in the balance.
+  const allocateSettlement = (
+    personId: string,
+    direction: 'received' | 'paid',
+    amount: number,
+    includeLoans: boolean,
+  ) => {
+    // They pay me -> clears loans I gave. I pay them -> clears loans I took.
+    const loans = includeLoans ? getOpenLoans(personId, direction === 'received' ? 'given' : 'taken') : [];
+    const toLoans: { loan: PersonLoan; amount: number }[] = [];
+    let remaining = amount;
+    for (const loan of loans) {
+      if (remaining <= 0) break;
+      const take = Math.min(remaining, Number(loan.outstanding));
+      if (take > 0) {
+        toLoans.push({ loan, amount: take });
+        remaining -= take;
+      }
+    }
+    const loanTotal = toLoans.reduce((s, a) => s + a.amount, 0);
+    return { toLoans, loanTotal, splitPortion: remaining };
+  };
+
   const openSettlementModal = (person: Person) => {
     setSelectedPerson(person);
     const { balance } = getPersonTab(person.id);
@@ -306,6 +364,7 @@ const Splits = () => {
     setSettleAccount('');
     setSettleDate(new Date().toLocaleDateString('en-CA'));
     setSettleNote('');
+    setApplyToLoans(true);
     setError('');
     setSettlementModal(true);
   };
@@ -320,41 +379,61 @@ const Splits = () => {
     try {
       const amount = Number(settleAmount);
       const acc = accounts.find(a => a.id === settleAccount);
+      const { toLoans, splitPortion } = allocateSettlement(
+        selectedPerson.id, settleDirection, amount, applyToLoans,
+      );
 
-      if (settleDirection === 'received') {
-        await supabase.from('transactions').insert({
-          user_id: user?.id,
-          date: new Date(settleDate).toISOString(),
-          amount,
-          type: 'reimbursement_received',
-          account_id: settleAccount,
-          category: 'Reimbursement',
-          note: settleNote || `Settlement from ${selectedPerson.name}`,
-        });
-        if (acc) await supabase.from('accounts').update({ balance: acc.balance + amount }).eq('id', settleAccount);
-      } else {
-        await supabase.from('transactions').insert({
-          user_id: user?.id,
-          date: new Date(settleDate).toISOString(),
-          amount,
-          type: 'expense',
-          account_id: settleAccount,
-          category: 'Split Settlement',
-          note: settleNote || `Payment to ${selectedPerson.name}`,
-        });
-        if (acc) await supabase.from('accounts').update({ balance: acc.balance - amount }).eq('id', settleAccount);
+      // One transaction for the full amount — it was one real payment, however
+      // it gets divided between loans and splits below.
+      const { data: tx } = await supabase.from('transactions').insert({
+        user_id: user?.id,
+        date: new Date(settleDate).toISOString(),
+        amount,
+        type: settleDirection === 'received' ? 'reimbursement_received' : 'expense',
+        account_id: settleAccount,
+        category: settleDirection === 'received' ? 'Reimbursement' : 'Split Settlement',
+        note: settleNote || (settleDirection === 'received'
+          ? `Settlement from ${selectedPerson.name}`
+          : `Payment to ${selectedPerson.name}`),
+      }).select().single();
+
+      if (acc) {
+        const newBalance = settleDirection === 'received' ? acc.balance + amount : acc.balance - amount;
+        await supabase.from('accounts').update({ balance: newBalance }).eq('id', settleAccount);
       }
 
-      const { error: settleErr } = await supabase.from('settlements').insert({
-        user_id: user?.id,
-        person_id: selectedPerson.id,
-        amount,
-        date: settleDate,
-        account_id: settleAccount,
-        notes: settleNote || null,
-        direction: settleDirection,
-      });
-      if (settleErr) throw new Error(settleErr.message);
+      // Loan portion: record a repayment and draw down each loan's outstanding.
+      for (const { loan, amount: applied } of toLoans) {
+        const { error: repayErr } = await supabase.from('loan_repayments').insert({
+          loan_id: loan.id,
+          user_id: user?.id,
+          amount: applied,
+          date: settleDate,
+          transaction_id: tx?.id || null,
+        });
+        if (repayErr) throw new Error(repayErr.message);
+
+        const newOutstanding = Math.max(0, Number(loan.outstanding) - applied);
+        await supabase.from('loans').update({
+          outstanding: newOutstanding,
+          status: newOutstanding === 0 ? 'fully_repaid' : 'active',
+        }).eq('id', loan.id);
+      }
+
+      // Split portion: only what wasn't absorbed by loans, so the balance
+      // isn't reduced twice for the same money.
+      if (splitPortion > 0) {
+        const { error: settleErr } = await supabase.from('settlements').insert({
+          user_id: user?.id,
+          person_id: selectedPerson.id,
+          amount: splitPortion,
+          date: settleDate,
+          account_id: settleAccount,
+          notes: settleNote || null,
+          direction: settleDirection,
+        });
+        if (settleErr) throw new Error(settleErr.message);
+      }
 
       setSettlementModal(false);
       fetchData();
@@ -384,7 +463,7 @@ const Splits = () => {
   };
 
   const generateSummary = (person: Person) => {
-    const { personOutings, paidByPersonOutings, openingBalance, receivedSettlements, paidSettlements, balance } = getPersonTab(person.id);
+    const { personOutings, paidByPersonOutings, openingBalance, receivedSettlements, paidSettlements, openLoans, balance } = getPersonTab(person.id);
 
     // "they owe you" debits, oldest first
     const owedItems: { place: string; text: string; amount: number }[] = [];
@@ -427,6 +506,25 @@ const Splits = () => {
       const sub = youOwe.unpaid.reduce((s, it) => s + it.show, 0);
       text += `Subtotal: ${formatCurrency(sub)}\n`;
       if (youOwe.cleared > 0) text += `(${formatCurrency(youOwe.cleared)} already paid — older items cleared)\n`;
+    }
+
+    // Loans are listed separately, not through fifoUnpaid — their `outstanding`
+    // is already net of repayments, so the settlement pool must not touch them.
+    const fmtLoanDate = (d: string) =>
+      new Date(d).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
+
+    const loansGiven = openLoans.filter(l => l.direction === 'given');
+    if (loansGiven.length > 0) {
+      text += `\n*Loan${loansGiven.length > 1 ? 's' : ''} you gave ${person.name}:*\n`;
+      loansGiven.forEach(l => { text += `${fmtLoanDate(l.date)} - ${formatCurrency(Number(l.outstanding))} outstanding\n`; });
+      text += `Subtotal: ${formatCurrency(loansGiven.reduce((s, l) => s + Number(l.outstanding), 0))}\n`;
+    }
+
+    const loansTaken = openLoans.filter(l => l.direction === 'taken');
+    if (loansTaken.length > 0) {
+      text += `\n*Loan${loansTaken.length > 1 ? 's' : ''} you took from ${person.name}:*\n`;
+      loansTaken.forEach(l => { text += `${fmtLoanDate(l.date)} - ${formatCurrency(Number(l.outstanding))} outstanding\n`; });
+      text += `Subtotal: ${formatCurrency(loansTaken.reduce((s, l) => s + Number(l.outstanding), 0))}\n`;
     }
 
     const netLabel = balance > 0 ? `${person.name} owes you` : balance < 0 ? `You owe ${person.name}` : 'All settled';
@@ -574,9 +672,9 @@ const Splits = () => {
                   ) : (
                     <Row>
                       {people.map(person => {
-                        const { personOutings, paidByPersonOutings, openingBalance, outingOwed, userOwesToPerson, receivedSettlements, paidSettlements, balance } = getPersonTab(person.id);
-                        const grossOwed = openingBalance + outingOwed;
-                        const totalActivity = grossOwed + userOwesToPerson;
+                        const { personOutings, paidByPersonOutings, openingBalance, outingOwed, userOwesToPerson, receivedSettlements, paidSettlements, loansGivenOut, loansTakenOut, balance } = getPersonTab(person.id);
+                        const grossOwed = openingBalance + outingOwed + loansGivenOut;
+                        const totalActivity = grossOwed + userOwesToPerson + loansTakenOut;
                         const netSettled = receivedSettlements - paidSettlements;
                         const pct = totalActivity > 0 ? Math.min(100, Math.max(0, (netSettled / totalActivity) * 100)) : 100;
                         const totalOutings = personOutings.length + paidByPersonOutings.length;
@@ -644,10 +742,22 @@ const Splits = () => {
                                       <small className="fw-semibold text-primary">{formatCurrency(outingOwed)}</small>
                                     </div>
                                   )}
+                                  {loansGivenOut > 0 && (
+                                    <div className="d-flex justify-content-between mb-1">
+                                      <small className="text-muted"><i className="ri-hand-coin-line me-1"></i>Loan given (outstanding)</small>
+                                      <small className="fw-semibold text-primary">{formatCurrency(loansGivenOut)}</small>
+                                    </div>
+                                  )}
                                   {userOwesToPerson > 0 && (
                                     <div className="d-flex justify-content-between mb-1">
                                       <small className="text-muted">You owe them</small>
                                       <small className="fw-semibold text-danger">{formatCurrency(userOwesToPerson)}</small>
+                                    </div>
+                                  )}
+                                  {loansTakenOut > 0 && (
+                                    <div className="d-flex justify-content-between mb-1">
+                                      <small className="text-muted"><i className="ri-hand-coin-line me-1"></i>Loan taken (outstanding)</small>
+                                      <small className="fw-semibold text-danger">{formatCurrency(loansTakenOut)}</small>
                                     </div>
                                   )}
                                   {receivedSettlements > 0 && (
@@ -1019,19 +1129,31 @@ const Splits = () => {
         <ModalBody>
           {error && <Alert color="danger">{error}</Alert>}
           {selectedPerson && (() => {
-            const { openingBalance, outingOwed, userOwesToPerson, receivedSettlements, paidSettlements, balance } = getPersonTab(selectedPerson.id);
+            const { openingBalance, outingOwed, userOwesToPerson, receivedSettlements, paidSettlements, loansGivenOut, loansTakenOut, balance } = getPersonTab(selectedPerson.id);
             return (
               <div className="bg-light rounded p-3 mb-3">
                 {openingBalance + outingOwed > 0 && (
                   <div className="d-flex justify-content-between">
-                    <small className="text-muted">They owe you</small>
+                    <small className="text-muted">They owe you (splits)</small>
                     <small className="fw-semibold text-primary">{formatCurrency(openingBalance + outingOwed)}</small>
+                  </div>
+                )}
+                {loansGivenOut > 0 && (
+                  <div className="d-flex justify-content-between mt-1">
+                    <small className="text-muted">Loan given (outstanding)</small>
+                    <small className="fw-semibold text-primary">{formatCurrency(loansGivenOut)}</small>
                   </div>
                 )}
                 {userOwesToPerson > 0 && (
                   <div className="d-flex justify-content-between mt-1">
-                    <small className="text-muted">You owe them</small>
+                    <small className="text-muted">You owe them (splits)</small>
                     <small className="fw-semibold text-danger">{formatCurrency(userOwesToPerson)}</small>
+                  </div>
+                )}
+                {loansTakenOut > 0 && (
+                  <div className="d-flex justify-content-between mt-1">
+                    <small className="text-muted">Loan taken (outstanding)</small>
+                    <small className="fw-semibold text-danger">{formatCurrency(loansTakenOut)}</small>
                   </div>
                 )}
                 {(receivedSettlements > 0 || paidSettlements > 0) && (
@@ -1080,6 +1202,45 @@ const Splits = () => {
             <FormGroup>
               <Label>Amount (PKR) <span className="text-danger">*</span></Label>
               <Input type="number" value={settleAmount} onChange={e => setSettleAmount(e.target.value)} />
+              {selectedPerson && getOpenLoans(selectedPerson.id, settleDirection === 'received' ? 'given' : 'taken').length > 0 && (() => {
+                const { toLoans, loanTotal, splitPortion } = allocateSettlement(
+                  selectedPerson.id, settleDirection, Number(settleAmount) || 0, applyToLoans,
+                );
+                return (
+                  <div className="mt-2">
+                    <div className="form-check form-switch">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id="applyToLoansToggle"
+                        checked={applyToLoans}
+                        onChange={e => setApplyToLoans(e.target.checked)}
+                      />
+                      <label className="form-check-label fs-12" htmlFor="applyToLoansToggle">
+                        Clear outstanding loans first
+                      </label>
+                    </div>
+                    {applyToLoans && loanTotal > 0 && (
+                      <div className="border rounded p-2 mt-2">
+                        <small className="text-muted d-block mb-1">This payment will be applied as:</small>
+                        {toLoans.map(({ loan, amount: applied }) => (
+                          <div className="d-flex justify-content-between" key={loan.id}>
+                            <small>Loan {loan.direction} — {new Date(loan.date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}</small>
+                            <small className="fw-semibold">{formatCurrency(applied)}</small>
+                          </div>
+                        ))}
+                        <div className="d-flex justify-content-between">
+                          <small>Splits</small>
+                          <small className="fw-semibold">{formatCurrency(splitPortion)}</small>
+                        </div>
+                      </div>
+                    )}
+                    {!applyToLoans && (
+                      <small className="text-muted">The whole amount goes against splits; loans stay untouched.</small>
+                    )}
+                  </div>
+                );
+              })()}
             </FormGroup>
             <FormGroup>
               <Label>{settleDirection === 'received' ? 'Received In' : 'Paid From'} <span className="text-danger">*</span></Label>
