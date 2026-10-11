@@ -85,6 +85,34 @@ const CreditCards = () => {
     return getMonthKey(d);
   });
 
+  const buildBillRow = (card: CreditCard, monthKey: string) => {
+    const [year, month] = monthKey.split('-').map(Number);
+    const billingDateObj = new Date(year, month - 1, card.billing_date);
+    const dueDay = card.due_date;
+    const dueMonth = dueDay < card.billing_date ? month : month - 1;
+    const dueDateObj = new Date(year, dueMonth, dueDay);
+    return {
+      user_id: user?.id, account_id: card.id, month: monthKey,
+      billing_date: billingDateObj.toLocaleDateString('en-CA'),
+      due_date: dueDateObj.toLocaleDateString('en-CA'),
+      status: 'pending', total_amount: 0,
+      statement_amount: null, minimum_due: null, total_paid: 0,
+    };
+  };
+
+  // Past months aren't auto-created — create the bill on demand when the user acts on it
+  const ensureBill = async (card: CreditCard, bill?: Bill): Promise<Bill | null> => {
+    if (bill) return bill;
+    const { data, error: err } = await supabase
+      .from('bills').insert(buildBillRow(card, selectedMonth)).select().single();
+    if (err || !data) {
+      alert(`Could not create bill for ${getMonthLabel(selectedMonth)}: ${err?.message || 'unknown error'}`);
+      return null;
+    }
+    setBills(prev => [...prev, data]);
+    return data;
+  };
+
   const fetchData = async (silent = false) => {
     if (!silent) setLoading(true);
 
@@ -106,18 +134,7 @@ const CreditCards = () => {
           const { data: existing } = await supabase
             .from('bills').select('id').eq('account_id', card.id).eq('month', selectedMonth).single();
           if (!existing) {
-            const [year, month] = selectedMonth.split('-').map(Number);
-            const billingDateObj = new Date(year, month - 1, card.billing_date);
-            const dueDay = card.due_date;
-            const dueMonth = dueDay < card.billing_date ? month : month - 1;
-            const dueDateObj = new Date(year, dueMonth, dueDay);
-            await supabase.from('bills').insert({
-              user_id: user?.id, account_id: card.id, month: selectedMonth,
-              billing_date: billingDateObj.toLocaleDateString('en-CA'),
-              due_date: dueDateObj.toLocaleDateString('en-CA'),
-              status: 'pending', total_amount: 0,
-              statement_amount: null, minimum_due: null, total_paid: 0,
-            });
+            await supabase.from('bills').insert(buildBillRow(card, selectedMonth));
           }
         }));
       }
@@ -150,11 +167,13 @@ const CreditCards = () => {
 
     if (bankData) setPayFromAccounts(bankData);
 
-    // Track latest bill month per card (to detect rolled-over old bills)
+    // Track latest bill month per card (to detect rolled-over old bills).
+    // Only bills with an entered statement count — an empty placeholder for the
+    // current month shouldn't mark last month's unpaid bill as rolled over.
     const { data: allBills } = await supabase
-      .from('bills').select('account_id, month').eq('user_id', user?.id);
+      .from('bills').select('account_id, month, statement_amount').eq('user_id', user?.id);
     const latestMap: Record<string, string> = {};
-    (allBills || []).forEach(b => {
+    (allBills || []).filter(b => (b.statement_amount || 0) > 0).forEach(b => {
       if (!latestMap[b.account_id] || b.month > latestMap[b.account_id])
         latestMap[b.account_id] = b.month;
     });
@@ -175,11 +194,15 @@ const CreditCards = () => {
     // Only show urgent bills for active (non-archived) credit cards
     const activeCardIds = new Set((cardData || []).map((c: any) => c.id));
     const seen = new Set<string>();
-    const deduped = (urgentData || []).filter(b => activeCardIds.has(b.account_id)).filter(b => {
-      if (seen.has(b.account_id)) return false;
-      seen.add(b.account_id);
-      return true;
-    });
+    // Skip empty placeholder bills (no statement yet) so they don't hide a real unpaid one
+    const deduped = (urgentData || [])
+      .filter(b => activeCardIds.has(b.account_id))
+      .filter(b => (b.statement_amount || 0) > 0)
+      .filter(b => {
+        if (seen.has(b.account_id)) return false;
+        seen.add(b.account_id);
+        return true;
+      });
     setUrgentBills(deduped);
 
     setLoading(false);
@@ -662,13 +685,13 @@ const CreditCards = () => {
                         ) : (
                           <div className="text-center py-3">
                             <p className="text-muted mb-2 fs-12">Statement not entered yet</p>
-                            <Button color="soft-primary" size="sm" onClick={() => bill && openStatementModal(bill)}>
+                            <Button color="soft-primary" size="sm" onClick={async () => { const b = await ensureBill(card, bill); if (b) openStatementModal(b); }}>
                               <i className="ri-file-list-line me-1"></i> Enter Statement
                             </Button>
                           </div>
                         )}
                         {stmtAmt > 0 && (
-                          <Button color="soft-secondary" size="sm" className="mt-2 w-100" onClick={() => bill && openStatementModal(bill)}>
+                          <Button color="soft-secondary" size="sm" className="mt-2 w-100" onClick={async () => { const b = await ensureBill(card, bill); if (b) openStatementModal(b); }}>
                             <i className="ri-edit-line me-1"></i> Edit Statement
                           </Button>
                         )}
@@ -678,11 +701,9 @@ const CreditCards = () => {
                       <Col md={4}>
                         <div className="d-flex justify-content-between align-items-center mb-2">
                           <p className="text-muted mb-0 fs-12">Payments Made</p>
-                          {bill && (
-                            <Button color="success" size="sm" onClick={() => bill && openPaymentModal(bill)}>
-                              <i className="ri-add-line me-1"></i> Add Payment
-                            </Button>
-                          )}
+                          <Button color="success" size="sm" onClick={async () => { const b = await ensureBill(card, bill); if (b) openPaymentModal(b); }}>
+                            <i className="ri-add-line me-1"></i> Add Payment
+                          </Button>
                         </div>
                         {billPayments.length === 0 ? (
                           <p className="text-muted fs-12 text-center py-2">No payments yet</p>
