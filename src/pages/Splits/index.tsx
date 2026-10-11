@@ -36,6 +36,17 @@ interface SharedOuting {
   outing_participants: { person_id: string; share_amount: number }[];
 }
 
+// Ledger model: the user collects every share — the payer's too — and repays the
+// payer the full bill. A payer isn't an outing_participants row; their share
+// equals your_share since outings split evenly.
+type ShareOuting = { your_share: number; paid_by_person_id: string | null; outing_participants: { person_id: string; share_amount: number }[] };
+const isInOuting = (o: ShareOuting, personId: string) =>
+  o.paid_by_person_id === personId || !!o.outing_participants?.some(p => p.person_id === personId);
+const shareOf = (o: ShareOuting, personId: string) =>
+  o.paid_by_person_id === personId
+    ? Number(o.your_share) || 0
+    : Number(o.outing_participants?.find(p => p.person_id === personId)?.share_amount) || 0;
+
 const Splits = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('people');
@@ -162,14 +173,15 @@ const Splits = () => {
   const getSharedBalance = (personId: string) => {
     const person = sharedPeople.find(p => p.id === personId);
     const opening = Number(person?.opening_balance) || 0;
-    const myOutings = sharedOutings.filter(o => o.outing_participants?.some(p => p.person_id === personId));
-    const owedByMe = myOutings.reduce((sum, o) => sum + (o.outing_participants.find(p => p.person_id === personId)?.share_amount || 0), 0);
+    const myOutings = sharedOutings.filter(o => isInOuting(o, personId));
+    const owedByMe = myOutings.reduce((sum, o) => sum + shareOf(o, personId), 0);
     const paidByMe = sharedOutings.filter(o => o.paid_by_person_id === personId);
-    const creatorOwesMe = paidByMe.reduce((sum, o) => sum + (Number(o.your_share) || 0), 0);
+    const creatorOwesMe = paidByMe.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
     const ps = sharedSettlements.filter(s => s.person_id === personId);
     const received = ps.filter(s => !s.direction || s.direction === 'received').reduce((sum, s) => sum + Number(s.amount), 0);
     const paid = ps.filter(s => s.direction === 'paid').reduce((sum, s) => sum + Number(s.amount), 0);
-    const balance = opening + owedByMe - creatorOwesMe - received + paid;
+    // Whole rupees — uneven splits leave paisa that shouldn't block "settled"
+    const balance = Math.round(opening + owedByMe - creatorOwesMe - received + paid);
     return { opening, owedByMe, creatorOwesMe, received, paid, myOutings, paidByMe, balance };
   };
 
@@ -227,18 +239,13 @@ const Splits = () => {
     const person = people.find(p => p.id === personId);
     const openingBalance = Number(person?.opening_balance) || 0;
 
-    // All outings where this person was a participant — they owe user their share
-    const personOutings = outings.filter(o =>
-      o.outing_participants.some(p => p.person_id === personId)
-    );
-    const outingOwed = personOutings.reduce((sum, o) => {
-      const participant = o.outing_participants.find(p => p.person_id === personId);
-      return sum + (participant?.share_amount || 0);
-    }, 0);
+    // Every outing this person was in (payer included) — they owe user their share
+    const personOutings = outings.filter(o => isInOuting(o, personId));
+    const outingOwed = personOutings.reduce((sum, o) => sum + shareOf(o, personId), 0);
 
-    // Outings where this person paid — user owes them user's own share
+    // Outings this person paid — user repays them the full bill
     const paidByPersonOutings = outings.filter(o => o.paid_by_person_id === personId);
-    const userOwesToPerson = paidByPersonOutings.reduce((sum, o) => sum + (Number(o.your_share) || 0), 0);
+    const userOwesToPerson = paidByPersonOutings.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
 
     const personSettlements = settlements.filter(s => s.person_id === personId);
     const receivedSettlements = personSettlements
@@ -258,8 +265,9 @@ const Splits = () => {
       .reduce((sum, l) => sum + Number(l.outstanding), 0);
 
     // positive = they owe user; negative = user owes them
-    const balance = openingBalance + outingOwed + loansGivenOut
-      - userOwesToPerson - loansTakenOut - receivedSettlements + paidSettlements;
+    // Whole rupees — uneven splits leave paisa that shouldn't block "settled"
+    const balance = Math.round(openingBalance + outingOwed + loansGivenOut
+      - userOwesToPerson - loansTakenOut - receivedSettlements + paidSettlements);
 
     return {
       personOutings, paidByPersonOutings, openingBalance, outingOwed, userOwesToPerson,
@@ -360,7 +368,7 @@ const Splits = () => {
     const { balance } = getPersonTab(person.id);
     const dir: 'received' | 'paid' = balance >= 0 ? 'received' : 'paid';
     setSettleDirection(dir);
-    setSettleAmount(String(Math.abs(balance).toFixed(2)));
+    setSettleAmount(String(Math.abs(balance)));
     setSettleAccount('');
     setSettleDate(new Date().toLocaleDateString('en-CA'));
     setSettleNote('');
@@ -469,7 +477,7 @@ const Splits = () => {
     const owedItems: { place: string; text: string; amount: number }[] = [];
     if (openingBalance > 0) owedItems.push({ place: 'Previous balance', text: `Previous balance - ${formatCurrency(openingBalance)}`, amount: openingBalance });
     [...personOutings].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).forEach(o => {
-      const share = o.outing_participants.find(p => p.person_id === person.id)?.share_amount || 0;
+      const share = shareOf(o, person.id);
       const isOnBehalf = o.your_share === 0 && !o.paid_by_person_id;
       const text = isOnBehalf
         ? `${o.place_name} - ${formatCurrency(share)}`
@@ -480,7 +488,7 @@ const Splits = () => {
     // "you owe them" debits, oldest first
     const youOweItems: { place: string; text: string; amount: number }[] = [];
     [...paidByPersonOutings].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).forEach(o => {
-      youOweItems.push({ place: o.place_name, text: `${o.place_name} - ${formatCurrency(o.total_amount)}/${o.total_people} = ${formatCurrency(o.your_share)}`, amount: Number(o.your_share) || 0 });
+      youOweItems.push({ place: o.place_name, text: `${o.place_name} - you paid ${formatCurrency(o.total_amount)}`, amount: Number(o.total_amount) || 0 });
     });
 
     const owed = fifoUnpaid(owedItems, receivedSettlements);
@@ -677,7 +685,7 @@ const Splits = () => {
                         const totalActivity = grossOwed + userOwesToPerson + loansTakenOut;
                         const netSettled = receivedSettlements - paidSettlements;
                         const pct = totalActivity > 0 ? Math.min(100, Math.max(0, (netSettled / totalActivity) * 100)) : 100;
-                        const totalOutings = personOutings.length + paidByPersonOutings.length;
+                        const totalOutings = personOutings.length;
                         return (
                           <Col md={6} xl={4} key={person.id} className="mb-3">
                             <Card className="border h-100">
@@ -943,13 +951,13 @@ const Splits = () => {
                                       : 'Settled ✓'}
                                   </small>
                                 </div>
-                                <small className="text-muted">{myOutings.length + paidByMe.length} outing{(myOutings.length + paidByMe.length) !== 1 ? 's' : ''}</small>
+                                <small className="text-muted">{myOutings.length} outing{myOutings.length !== 1 ? 's' : ''}</small>
                               </div>
 
                               {(myOutings.length > 0 || paidByMe.length > 0) && (
                                 <div className="mt-2 pt-2 border-top">
                                   {myOutings.map(o => {
-                                    const share = o.outing_participants.find(p => p.person_id === person.id)?.share_amount || 0;
+                                    const share = shareOf(o, person.id);
                                     return (
                                       <div className="d-flex justify-content-between" key={o.id}>
                                         <small className="text-muted">{o.place_name}</small>
@@ -960,7 +968,7 @@ const Splits = () => {
                                   {paidByMe.map(o => (
                                     <div className="d-flex justify-content-between" key={o.id}>
                                       <small className="text-muted">{o.place_name} (you paid)</small>
-                                      <small className="text-primary">{formatCurrency(o.your_share)}</small>
+                                      <small className="text-primary">{formatCurrency(o.total_amount)}</small>
                                     </div>
                                   ))}
                                 </div>
@@ -1105,8 +1113,9 @@ const Splits = () => {
                 <small>
                   <strong>{outingParticipants.length + 2} people</strong> total (you + {people.find(p => p.id === outingPayer)?.name} + {outingParticipants.length} other{outingParticipants.length !== 1 ? 's' : ''})
                   {' → '}
-                  <strong>Your share: {formatCurrency(Number(outingAmount) / (outingParticipants.length + 2))}</strong>
-                  {' — you owe this to the payer'}
+                  <strong>Each share: {formatCurrency(Number(outingAmount) / (outingParticipants.length + 2))}</strong>
+                  {' — everyone (incl. '}{people.find(p => p.id === outingPayer)?.name}{') owes you their share; you owe '}
+                  {people.find(p => p.id === outingPayer)?.name}{' the full '}<strong>{formatCurrency(Number(outingAmount))}</strong>
                 </small>
               </Alert>
             )}

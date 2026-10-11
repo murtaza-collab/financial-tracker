@@ -91,7 +91,7 @@ const Dashboard = () => {
         .select('id, name, target_amount, current_amount')
         .eq('user_id', user?.id).eq('status', 'active'),
       supabase.from('budget_rules').select('*').eq('user_id', user?.id).eq('month', MONTH_KEY()),
-      supabase.from('outings').select('total_amount, your_share, paid_by_person_id').eq('user_id', user?.id),
+      supabase.from('outings').select('total_amount, your_share, paid_by_person_id, outing_participants(share_amount)').eq('user_id', user?.id),
       supabase.from('settlements').select('amount, direction').eq('user_id', user?.id),
       supabase.from('split_people').select('opening_balance').eq('user_id', user?.id),
     ]);
@@ -107,10 +107,12 @@ const Dashboard = () => {
     if (goalData) setGoals(goalData);
     if (budgetData) setBudgets(budgetData);
 
-    // Outings user paid → others owe user
+    // Everyone else's share is owed to the user — including the payer's when a
+    // contact paid (the user then repays that payer the full bill, below)
     const outingsToRecover = (outingData || [])
-      .filter((o: any) => !o.paid_by_person_id)
-      .reduce((s: number, o: any) => s + ((o.total_amount || 0) - (o.your_share || 0)), 0);
+      .reduce((s: number, o: any) => s + (o.paid_by_person_id
+        ? (o.outing_participants || []).reduce((ps: number, p: any) => ps + (Number(p.share_amount) || 0), 0) + (Number(o.your_share) || 0)
+        : (o.total_amount || 0) - (o.your_share || 0)), 0);
     const openingBalances = (splitPeopleData || []).reduce(
       (s: number, p: any) => s + (Number(p.opening_balance) || 0), 0
     );
@@ -120,10 +122,10 @@ const Dashboard = () => {
       .reduce((s: number, st: any) => s + Number(st.amount), 0);
     setSplitsPending(Math.max(0, totalToRecover - totalRecovered));
 
-    // Outings someone else paid → user owes them
+    // Outings someone else paid → user repays them the full bill
     const youOweGross = (outingData || [])
       .filter((o: any) => !!o.paid_by_person_id)
-      .reduce((s: number, o: any) => s + (Number(o.your_share) || 0), 0);
+      .reduce((s: number, o: any) => s + (Number(o.total_amount) || 0), 0);
     const totalPaidOut = (settlementData || [])
       .filter((st: any) => st.direction === 'paid')
       .reduce((s: number, st: any) => s + Number(st.amount), 0);
@@ -166,6 +168,10 @@ const Dashboard = () => {
   const totalOwedToMe  = loansGiven.reduce((s, l) => s + Number(l.outstanding), 0);
   const totalIOwe      = loansTaken.reduce((s, l) => s + Number(l.outstanding), 0);
   const monthlyEMI     = emis.reduce((s, e) => s + Number(e.emi_amount), 0);
+  const emiRemaining   = emis.reduce((s, e) => s + Number(e.emi_amount) * Math.max(0, e.tenure_months - e.paid_count), 0);
+
+  // Everything you owe: card outstanding + loans taken + remaining EMIs + Splits you owe
+  const totalLiabilities = creditOutstanding + totalIOwe + emiRemaining + splitsYouOwe;
 
   const categorySpend: Record<string, number> = {};
   personalTx
@@ -212,7 +218,7 @@ const Dashboard = () => {
 
           {/* ── Row 1 · Position ─────────────────────────────────────────── */}
           <Row className="mb-3">
-            <Col md={4}>
+            <Col md={6} xl={3}>
               <Card className="card-animate">
                 <CardBody>
                   <div className="d-flex justify-content-between">
@@ -230,7 +236,7 @@ const Dashboard = () => {
                 </CardBody>
               </Card>
             </Col>
-            <Col md={4}>
+            <Col md={6} xl={3}>
               <Card className="card-animate">
                 <CardBody>
                   <div className="d-flex justify-content-between">
@@ -248,7 +254,7 @@ const Dashboard = () => {
                 </CardBody>
               </Card>
             </Col>
-            <Col md={4}>
+            <Col md={6} xl={3}>
               <Card className="card-animate">
                 <CardBody>
                   <div className="d-flex justify-content-between">
@@ -262,6 +268,29 @@ const Dashboard = () => {
                         <i className="ri-bank-card-line text-danger"></i>
                       </span>
                     </div>
+                  </div>
+                </CardBody>
+              </Card>
+            </Col>
+            <Col md={6} xl={3}>
+              <Card className="card-animate">
+                <CardBody>
+                  <div className="d-flex justify-content-between">
+                    <div>
+                      <p className="text-muted mb-1 fs-13">Total Liabilities</p>
+                      <h4 className="text-danger">{formatCurrency(totalLiabilities)}</h4>
+                    </div>
+                    <div className="avatar-sm">
+                      <span className="avatar-title bg-warning-subtle rounded-circle fs-3">
+                        <i className="ri-scales-3-line text-warning"></i>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="fs-12 text-muted mt-1">
+                    <div className="d-flex justify-content-between"><span>Credit cards</span><span>{formatCurrency(creditOutstanding)}</span></div>
+                    <div className="d-flex justify-content-between"><span>Loans taken</span><span>{formatCurrency(totalIOwe)}</span></div>
+                    <div className="d-flex justify-content-between"><span>EMIs remaining</span><span>{formatCurrency(emiRemaining)}</span></div>
+                    <div className="d-flex justify-content-between"><span>Splits you owe</span><span>{formatCurrency(splitsYouOwe)}</span></div>
                   </div>
                 </CardBody>
               </Card>

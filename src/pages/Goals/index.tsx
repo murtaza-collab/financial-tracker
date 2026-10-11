@@ -99,7 +99,7 @@ const Goals = () => {
 
   const handleDeleteGoal = async (goal: Goal) => {
   const confirmMsg = goal.current_amount > 0
-    ? `Delete "${goal.name}"? Rs. ${goal.current_amount.toLocaleString()} has already been saved. The money remains in ${goal.accounts?.name} — only the goal tracker will be deleted.`
+    ? `Delete "${goal.name}"? ${formatCurrency(goal.current_amount)} has already been saved. The money remains in ${goal.accounts?.name} — only the goal tracker will be deleted.`
     : `Delete "${goal.name}"?`;
 
   if (!window.confirm(confirmMsg)) return;

@@ -125,6 +125,9 @@ const Accounts = () => {
       type: editAccount?.type || 'bank_savings',
       balance: editAccount?.balance ?? 0,
       credit_limit: editAccount?.credit_limit ?? '',
+      available_limit: editAccount?.type === 'credit_card' && editAccount.credit_limit != null
+        ? Number(editAccount.credit_limit) - Number(editAccount.balance)
+        : '',
       billing_date: editAccount?.billing_date ?? '',
       due_date: editAccount?.due_date ?? '',
       last_four: editAccount?.last_four || '',
@@ -132,7 +135,17 @@ const Accounts = () => {
     validationSchema: Yup.object({
       name: Yup.string().required('Please enter an account name'),
       type: Yup.string().required('Please select account type'),
-      balance: Yup.number().required('Please enter opening balance'),
+      balance: Yup.number().when('type', {
+        is: 'credit_card',
+        then: (s) => s.nullable(),
+        otherwise: (s) => s.required('Please enter opening balance'),
+      }),
+      available_limit: Yup.number().when('type', {
+        is: 'credit_card',
+        // Negative available = card is over its limit, so allow it
+        then: (s) => s.required('Please enter available limit'),
+        otherwise: (s) => s.nullable(),
+      }),
       credit_limit: Yup.number().when('type', {
         is: 'credit_card',
         then: (s) => s.required('Please enter credit limit'),
@@ -162,7 +175,10 @@ const Accounts = () => {
         name: values.name,
         bank_name: values.bank_name || null,
         type: values.type,
-        balance: Number(values.balance),
+        // For credit cards, outstanding is derived: limit − available
+        balance: values.type === 'credit_card'
+          ? Number(values.credit_limit) - Number(values.available_limit)
+          : Number(values.balance),
         credit_limit: values.credit_limit ? Number(values.credit_limit) : null,
         billing_date: values.billing_date ? Number(values.billing_date) : null,
         due_date: values.due_date ? Number(values.due_date) : null,
@@ -181,15 +197,104 @@ const Accounts = () => {
   });
 
   const isCreditCard = validation.values.type === 'credit_card';
+  const derivedOutstanding = validation.values.credit_limit !== '' && validation.values.available_limit !== ''
+    ? Number(validation.values.credit_limit) - Number(validation.values.available_limit)
+    : null;
   const hasAccountNumber = ['bank_savings', 'bank_current', 'credit_card'].includes(validation.values.type);
 
-  const totalBalance = accounts
-    .filter(a => a.type !== 'credit_card')
-    .reduce((sum, a) => sum + Number(a.balance), 0);
+  const bankAccounts = accounts.filter(a => a.type !== 'credit_card');
+  const creditCards = accounts.filter(a => a.type === 'credit_card');
 
-  const totalCreditOutstanding = accounts
-    .filter(a => a.type === 'credit_card')
-    .reduce((sum, a) => sum + Number(a.balance), 0);
+  const totalBalance = bankAccounts.reduce((sum, a) => sum + Number(a.balance), 0);
+
+  // Outstanding = credit cards only (loans/EMIs live on their own pages)
+  const totalCreditOutstanding = creditCards.reduce((sum, a) => sum + Number(a.balance), 0);
+  const cardsWithLimit = creditCards.filter(a => a.credit_limit != null);
+  const totalCreditLimit = cardsWithLimit.reduce((sum, a) => sum + Number(a.credit_limit), 0);
+  const totalAvailableLimit = cardsWithLimit.reduce((sum, a) => sum + Number(a.credit_limit) - Number(a.balance), 0);
+  const utilization = totalCreditLimit > 0 ? (totalCreditOutstanding / totalCreditLimit) * 100 : 0;
+
+  const renderStat = (label: string, value: React.ReactNode, icon: string, color: string, valueClass = '') => (
+    <Card className="card-animate mb-0 h-100">
+      <CardBody>
+        <div className="d-flex justify-content-between">
+          <div>
+            <p className="text-muted mb-1">{label}</p>
+            <h4 className={valueClass}>{value}</h4>
+          </div>
+          <div className="avatar-sm"><span className={`avatar-title bg-${color}-subtle rounded-circle fs-3`}><i className={`${icon} text-${color}`}></i></span></div>
+        </div>
+      </CardBody>
+    </Card>
+  );
+
+  const renderAccountCard = (account: Account) => {
+    const isCard = account.type === 'credit_card';
+    const available = isCard && account.credit_limit != null
+      ? Number(account.credit_limit) - Number(account.balance)
+      : null;
+    return (
+      <Col md={6} xl={4} key={account.id} className="mb-3">
+        <Card className="border mb-0 h-100">
+          <CardBody>
+            <div className="d-flex align-items-center mb-3">
+              <div className={`avatar-sm me-3`}>
+                <span className={`avatar-title bg-${accountTypeColors[account.type]}-subtle rounded-circle fs-4`}>
+                  <i className={`${accountTypeIcons[account.type]} text-${accountTypeColors[account.type]}`}></i>
+                </span>
+              </div>
+              <div className="flex-grow-1">
+                <h6 className="mb-0">{account.name}</h6>
+                <small className="text-muted">{account.bank_name || accountTypeLabels[account.type]}</small>
+              </div>
+              <Badge color={accountTypeColors[account.type]} pill>
+                {accountTypeLabels[account.type]}
+              </Badge>
+            </div>
+
+            <div className="mb-3">
+              <p className="text-muted mb-1 fs-12">
+                {isCard ? 'Outstanding Balance' : 'Current Balance'}
+              </p>
+              <h5 className={isCard ? 'text-danger' : 'text-success'}>
+                {formatCurrency(Number(account.balance))}
+              </h5>
+              {isCard && account.credit_limit != null && (
+                <div className="d-flex justify-content-between">
+                  <small className="text-muted">Limit: {formatCurrency(Number(account.credit_limit))}</small>
+                  <small className={available! < 0 ? 'text-danger' : 'text-success'}>
+                    Available: {formatCurrency(available!)}
+                  </small>
+                </div>
+              )}
+            </div>
+
+            {account.last_four && (
+              <p className="text-muted fs-12 mb-3">
+                <i className="ri-bank-card-line me-1"></i> •••• {account.last_four}
+              </p>
+            )}
+
+            {isCard && (
+              <div className="d-flex gap-3 mb-3">
+                {account.billing_date && <small className="text-muted"><i className="ri-calendar-line me-1"></i>Bills on {account.billing_date}th</small>}
+                {account.due_date && <small className="text-muted"><i className="ri-time-line me-1"></i>Due on {account.due_date}th</small>}
+              </div>
+            )}
+
+            <div className="d-flex gap-2">
+              <Button color="soft-primary" size="sm" className="flex-grow-1" onClick={() => openEdit(account)}>
+                <i className="ri-edit-line me-1"></i> Edit
+              </Button>
+              <Button color="soft-danger" size="sm" onClick={() => handleArchive(account.id)}>
+                <i className="ri-archive-line"></i>
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      </Col>
+    );
+  };
 
   return (
     <React.Fragment>
@@ -197,132 +302,82 @@ const Accounts = () => {
         <Container fluid>
           <BreadCrumb title="Accounts & Cards" pageTitle="Finance Portal" />
 
-          {/* Summary Row */}
-          <Row className="mb-4">
-            <Col md={4}>
-              <Card className="card-animate">
-                <CardBody>
-                  <div className="d-flex justify-content-between">
-                    <div>
-                      <p className="text-muted mb-1">Total Balance</p>
-                      <h4 className="text-success">{formatCurrency(totalBalance)}</h4>
-                    </div>
-                    <div className="avatar-sm"><span className="avatar-title bg-success-subtle rounded-circle fs-3"><i className="ri-money-dollar-circle-line text-success"></i></span></div>
-                  </div>
-                </CardBody>
-              </Card>
+          {/* Accounts Summary */}
+          <h5 className="mb-3">Accounts</h5>
+          <Row className="mb-4 g-3">
+            <Col md={6}>
+              {renderStat('Total Balance', formatCurrency(totalBalance), 'ri-money-dollar-circle-line', 'success', 'text-success')}
             </Col>
-            <Col md={4}>
-              <Card className="card-animate">
-                <CardBody>
-                  <div className="d-flex justify-content-between">
-                    <div>
-                      <p className="text-muted mb-1">Credit Card Outstanding</p>
-                      <h4 className="text-danger">{formatCurrency(totalCreditOutstanding)}</h4>
-                    </div>
-                    <div className="avatar-sm"><span className="avatar-title bg-danger-subtle rounded-circle fs-3"><i className="ri-bank-card-line text-danger"></i></span></div>
-                  </div>
-                </CardBody>
-              </Card>
-            </Col>
-            <Col md={4}>
-              <Card className="card-animate">
-                <CardBody>
-                  <div className="d-flex justify-content-between">
-                    <div>
-                      <p className="text-muted mb-1">Total Accounts</p>
-                      <h4>{accounts.length}</h4>
-                    </div>
-                    <div className="avatar-sm"><span className="avatar-title bg-info-subtle rounded-circle fs-3"><i className="ri-bank-line text-info"></i></span></div>
-                  </div>
-                </CardBody>
-              </Card>
+            <Col md={6}>
+              {renderStat('Total Accounts', bankAccounts.length, 'ri-bank-line', 'info')}
             </Col>
           </Row>
 
-          {/* Accounts List */}
-          <Row>
-            <Col>
+          {/* Credit Cards Summary */}
+          <h5 className="mb-3">Credit Cards</h5>
+          <Row className="mb-4 g-3">
+            <Col md={6} xl={3}>
+              {renderStat('Total Credit Limit', formatCurrency(totalCreditLimit), 'ri-bank-card-line', 'primary')}
+            </Col>
+            <Col md={6} xl={3}>
+              {renderStat('Available Limit', formatCurrency(totalAvailableLimit), 'ri-wallet-3-line', 'success', totalAvailableLimit < 0 ? 'text-danger' : 'text-success')}
+            </Col>
+            <Col md={6} xl={3}>
+              {renderStat('Outstanding', formatCurrency(totalCreditOutstanding), 'ri-error-warning-line', 'danger', 'text-danger')}
+            </Col>
+            <Col md={6} xl={3}>
+              {renderStat(
+                'Utilization',
+                <>{utilization.toFixed(0)}% <small className="text-muted fs-12">· {creditCards.length} card{creditCards.length === 1 ? '' : 's'}</small></>,
+                'ri-pie-chart-line',
+                'warning',
+                utilization > 70 ? 'text-danger' : utilization > 30 ? 'text-warning' : 'text-success',
+              )}
+            </Col>
+          </Row>
+
+          {loading ? (
+            <div className="text-center py-5"><Spinner color="primary" /></div>
+          ) : accounts.length === 0 ? (
+            <Card>
+              <CardBody className="text-center py-5">
+                <i className="ri-bank-line fs-1 text-muted"></i>
+                <p className="text-muted mt-2">No accounts yet. Add your first account to get started.</p>
+                <Button color="success" onClick={toggleModal}>Add Account</Button>
+              </CardBody>
+            </Card>
+          ) : (
+            <>
               <Card>
                 <CardHeader className="d-flex align-items-center justify-content-between">
-                  <h5 className="mb-0">My Accounts & Cards</h5>
+                  <h5 className="mb-0">My Accounts</h5>
                   <Button color="success" size="sm" onClick={toggleModal}>
                     <i className="ri-add-line me-1"></i> Add Account
                   </Button>
                 </CardHeader>
                 <CardBody>
-                  {loading ? (
-                    <div className="text-center py-5"><Spinner color="primary" /></div>
-                  ) : accounts.length === 0 ? (
-                    <div className="text-center py-5">
-                      <i className="ri-bank-line fs-1 text-muted"></i>
-                      <p className="text-muted mt-2">No accounts yet. Add your first account to get started.</p>
-                      <Button color="success" onClick={toggleModal}>Add Account</Button>
-                    </div>
+                  {bankAccounts.length === 0 ? (
+                    <p className="text-muted text-center mb-0">No bank accounts or wallets yet.</p>
                   ) : (
-                    <Row>
-                      {accounts.map((account) => (
-                        <Col md={6} xl={4} key={account.id} className="mb-3">
-                          <Card className="border mb-0 h-100">
-                            <CardBody>
-                              <div className="d-flex align-items-center mb-3">
-                                <div className={`avatar-sm me-3`}>
-                                  <span className={`avatar-title bg-${accountTypeColors[account.type]}-subtle rounded-circle fs-4`}>
-                                    <i className={`${accountTypeIcons[account.type]} text-${accountTypeColors[account.type]}`}></i>
-                                  </span>
-                                </div>
-                                <div className="flex-grow-1">
-                                  <h6 className="mb-0">{account.name}</h6>
-                                  <small className="text-muted">{account.bank_name || accountTypeLabels[account.type]}</small>
-                                </div>
-                                <Badge color={accountTypeColors[account.type]} pill>
-                                  {accountTypeLabels[account.type]}
-                                </Badge>
-                              </div>
-
-                              <div className="mb-3">
-                                <p className="text-muted mb-1 fs-12">
-                                  {account.type === 'credit_card' ? 'Outstanding Balance' : 'Current Balance'}
-                                </p>
-                                <h5 className={account.type === 'credit_card' ? 'text-danger' : 'text-success'}>
-                                  {formatCurrency(Number(account.balance))}
-                                </h5>
-                                {account.type === 'credit_card' && account.credit_limit && (
-                                  <small className="text-muted">Limit: {formatCurrency(Number(account.credit_limit))}</small>
-                                )}
-                              </div>
-
-                              {account.last_four && (
-                                <p className="text-muted fs-12 mb-3">
-                                  <i className="ri-bank-card-line me-1"></i> •••• {account.last_four}
-                                </p>
-                              )}
-
-                              {account.type === 'credit_card' && (
-                                <div className="d-flex gap-3 mb-3">
-                                  {account.billing_date && <small className="text-muted"><i className="ri-calendar-line me-1"></i>Bills on {account.billing_date}th</small>}
-                                  {account.due_date && <small className="text-muted"><i className="ri-time-line me-1"></i>Due on {account.due_date}th</small>}
-                                </div>
-                              )}
-
-                              <div className="d-flex gap-2">
-                                <Button color="soft-primary" size="sm" className="flex-grow-1" onClick={() => openEdit(account)}>
-                                  <i className="ri-edit-line me-1"></i> Edit
-                                </Button>
-                                <Button color="soft-danger" size="sm" onClick={() => handleArchive(account.id)}>
-                                  <i className="ri-archive-line"></i>
-                                </Button>
-                              </div>
-                            </CardBody>
-                          </Card>
-                        </Col>
-                      ))}
-                    </Row>
+                    <Row>{bankAccounts.map(renderAccountCard)}</Row>
                   )}
                 </CardBody>
               </Card>
-            </Col>
-          </Row>
+
+              <Card>
+                <CardHeader className="d-flex align-items-center justify-content-between">
+                  <h5 className="mb-0">My Credit Cards</h5>
+                </CardHeader>
+                <CardBody>
+                  {creditCards.length === 0 ? (
+                    <p className="text-muted text-center mb-0">No credit cards yet. Use Add Account and pick Credit Card.</p>
+                  ) : (
+                    <Row>{creditCards.map(renderAccountCard)}</Row>
+                  )}
+                </CardBody>
+              </Card>
+            </>
+          )}
         </Container>
       </div>
 
@@ -374,19 +429,21 @@ const Accounts = () => {
   </FormGroup>
 )}
 
-            <FormGroup>
-              <Label>{isCreditCard ? 'Current Outstanding (PKR)' : 'Opening Balance (PKR)'} <span className="text-danger">*</span></Label>
-              <Input
-                type="number"
-                name="balance"
-                placeholder="0.00"
-                value={validation.values.balance}
-                onChange={validation.handleChange}
-                onBlur={validation.handleBlur}
-                invalid={validation.touched.balance && !!validation.errors.balance}
-              />
-              {validation.touched.balance && validation.errors.balance && <FormFeedback>{validation.errors.balance}</FormFeedback>}
-            </FormGroup>
+            {!isCreditCard && (
+              <FormGroup>
+                <Label>Opening Balance (PKR) <span className="text-danger">*</span></Label>
+                <Input
+                  type="number"
+                  name="balance"
+                  placeholder="0.00"
+                  value={validation.values.balance}
+                  onChange={validation.handleChange}
+                  onBlur={validation.handleBlur}
+                  invalid={validation.touched.balance && !!validation.errors.balance}
+                />
+                {validation.touched.balance && validation.errors.balance && <FormFeedback>{validation.errors.balance}</FormFeedback>}
+              </FormGroup>
+            )}
 
             {isCreditCard && (
               <>
@@ -402,6 +459,26 @@ const Accounts = () => {
                     invalid={validation.touched.credit_limit && !!validation.errors.credit_limit}
                   />
                   {validation.touched.credit_limit && validation.errors.credit_limit && <FormFeedback>{validation.errors.credit_limit as string}</FormFeedback>}
+                </FormGroup>
+                <FormGroup>
+                  <Label>Available Limit (PKR) <span className="text-danger">*</span></Label>
+                  <Input
+                    type="number"
+                    name="available_limit"
+                    placeholder="e.g. 75000"
+                    value={validation.values.available_limit}
+                    onChange={validation.handleChange}
+                    onBlur={validation.handleBlur}
+                    invalid={validation.touched.available_limit && !!validation.errors.available_limit}
+                  />
+                  {validation.touched.available_limit && validation.errors.available_limit && <FormFeedback>{validation.errors.available_limit as string}</FormFeedback>}
+                  {derivedOutstanding !== null && (
+                    <small className={`d-block mt-1 ${derivedOutstanding < 0 ? 'text-success' : 'text-muted'}`}>
+                      {derivedOutstanding < 0
+                        ? `Credit balance (overpaid): ${formatCurrency(Math.abs(derivedOutstanding))}`
+                        : `Outstanding: ${formatCurrency(derivedOutstanding)}`}
+                    </small>
+                  )}
                 </FormGroup>
                 <Row>
                   <Col md={6}>
