@@ -4,18 +4,15 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
+import { useCategories } from '../../hooks/useCategories';
 
 interface BudgetRule {
   id: string; category: string; monthly_limit: number; month: string;
 }
 interface SpendData { category: string; spent: number; }
 
-const CATEGORIES = [
-  'Grocery', 'Restaurant & Food', 'Fuel', 'Utility Bills',
-  'Mobile & Internet', 'Medical', 'Transport', 'Shopping',
-  'Education', 'Rent', 'Family', 'Entertainment', 'Travel',
-  'Office Expense', 'Other',
-];
+// Income categories can't be budgeted — hide them from the picker
+const INCOME_CATEGORIES = ['Salary', 'Freelance Income', 'Business Income', 'Reimbursement'];
 
 const getMonthKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -27,6 +24,7 @@ const getMonthLabel = (monthKey: string) => {
 
 const Budget = () => {
   const { user } = useAuth();
+  const budgetCategories = useCategories(user?.id).filter(c => !INCOME_CATEGORIES.includes(c));
   const [budgets, setBudgets] = useState<BudgetRule[]>([]);
   const [spending, setSpending] = useState<SpendData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -414,7 +412,7 @@ const Budget = () => {
                 disabled={!!editBudget}
               >
                 <option value="">Select category...</option>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {budgetCategories.map(c => <option key={c} value={c}>{c}</option>)}
               </Input>
             </FormGroup>
             <FormGroup>
