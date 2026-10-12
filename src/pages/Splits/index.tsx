@@ -60,6 +60,7 @@ const Splits = () => {
 
   const [personModal, setPersonModal] = useState(false);
   const [settlementModal, setSettlementModal] = useState(false);
+  const [summary, setSummary] = useState<{ name: string; text: string; copied: boolean } | null>(null);
   const [outingModal, setOutingModal] = useState(false);
   const [editPerson, setEditPerson] = useState<Person | null>(null);
   const [saving, setSaving] = useState(false);
@@ -539,8 +540,14 @@ const Splits = () => {
     text += balance === 0
       ? `\n*Net: All settled ✓*`
       : `\n*Net: ${netLabel} ${formatCurrency(Math.abs(balance))}*`;
-    navigator.clipboard.writeText(text);
-    alert('Summary copied to clipboard! Paste in WhatsApp.');
+    setSummary({ name: person.name, text, copied: false });
+    copySummary(text);
+  };
+
+  const copySummary = (text: string) => {
+    navigator.clipboard.writeText(text)
+      .then(() => setSummary(prev => prev && { ...prev, copied: true }))
+      .catch(() => setSummary(prev => prev && { ...prev, copied: false }));
   };
 
   const totalPendingAll = people.reduce((sum, p) => {
@@ -1126,6 +1133,33 @@ const Splits = () => {
           <Button color="primary" onClick={handleAddOuting} disabled={saving}>
             {saving && <Spinner size="sm" className="me-2" />}
             Add Outing
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Summary Preview Modal — WhatsApp *bold* lines rendered bold */}
+      <Modal isOpen={!!summary} toggle={() => setSummary(null)} centered scrollable>
+        <ModalHeader toggle={() => setSummary(null)}>
+          Summary — {summary?.name}
+        </ModalHeader>
+        <ModalBody>
+          {summary && (
+            <Alert color={summary.copied ? 'success' : 'warning'} className="py-2 fs-13">
+              <i className={`${summary.copied ? 'ri-checkbox-circle-line' : 'ri-error-warning-line'} me-1`}></i>
+              {summary.copied ? 'Copied to clipboard — paste in WhatsApp.' : "Couldn't copy automatically — tap Copy again."}
+            </Alert>
+          )}
+          <div className="bg-light rounded p-3 fs-13" style={{ whiteSpace: 'pre-wrap' }}>
+            {summary?.text.split('\n').map((line, i) => {
+              const bold = line.length > 1 && line.startsWith('*') && line.endsWith('*');
+              return <div key={i} className={bold ? 'fw-semibold' : ''}>{(bold ? line.slice(1, -1) : line) || '\u00A0'}</div>;
+            })}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button color="light" onClick={() => setSummary(null)}>Close</Button>
+          <Button color="success" onClick={() => summary && copySummary(summary.text)}>
+            <i className="ri-file-copy-line me-1"></i> Copy again
           </Button>
         </ModalFooter>
       </Modal>
