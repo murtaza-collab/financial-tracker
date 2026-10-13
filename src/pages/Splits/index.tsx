@@ -47,6 +47,11 @@ const shareOf = (o: ShareOuting, personId: string) =>
     ? Number(o.your_share) || 0
     : Number(o.outing_participants?.find(p => p.person_id === personId)?.share_amount) || 0;
 
+// Sentinel for "I paid" in the outing payer dropdown (person ids are uuids)
+const PAYER_ME = 'me';
+// Sentinel for "no account" in the settlement dropdown — record it in Splits only
+const NO_ACCOUNT = 'none';
+
 const Splits = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('people');
@@ -84,6 +89,7 @@ const Splits = () => {
   const [outingAmount, setOutingAmount] = useState('');
   const [outingPayer, setOutingPayer] = useState('');
   const [outingParticipants, setOutingParticipants] = useState<string[]>([]);
+  const [outingIncludeMe, setOutingIncludeMe] = useState(true);
 
   // Phase 2 — splits shared with ME (I'm the counterparty)
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
@@ -282,6 +288,7 @@ const Splits = () => {
     setOutingAmount('');
     setOutingPayer('');
     setOutingParticipants([]);
+    setOutingIncludeMe(true);
     setError('');
     setOutingModal(true);
   };
@@ -295,13 +302,19 @@ const Splits = () => {
       setError('Please fill all required fields');
       return;
     }
+    const paidByMe = outingPayer === PAYER_ME;
+    if (paidByMe && outingParticipants.length === 0) {
+      setError('Select at least one person to split with');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
       const amount = Number(outingAmount);
       const payer = people.find(p => p.id === outingPayer);
-      // total people = payer + user + other participants
-      const totalPeople = outingParticipants.length + 2;
+      // total people = participants + user (unless paying on their behalf) + payer when a contact paid
+      const includeMe = !paidByMe || outingIncludeMe;
+      const totalPeople = outingParticipants.length + (includeMe ? 1 : 0) + (paidByMe ? 0 : 1);
       const sharePerPerson = amount / totalPeople;
 
       const { data: newOuting, error: outingErr } = await supabase.from('outings').insert({
@@ -310,10 +323,12 @@ const Splits = () => {
         date: outingDate,
         total_amount: amount,
         total_people: totalPeople,
-        your_share: sharePerPerson,
-        paid_by: payer?.name || 'Someone else',
-        paid_by_person_id: outingPayer,
+        // 0 = paid on their behalf — the full bill is recoverable
+        your_share: includeMe ? sharePerPerson : 0,
+        paid_by: paidByMe ? 'me' : payer?.name || 'Someone else',
+        paid_by_person_id: paidByMe ? null : outingPayer,
         notes: null,
+        // Splits-only entry: no transaction, no account balance change
         transaction_id: null,
       }).select().single();
 
@@ -387,14 +402,16 @@ const Splits = () => {
     setError('');
     try {
       const amount = Number(settleAmount);
+      const noAccount = settleAccount === NO_ACCOUNT;
+      const accountId = noAccount ? null : settleAccount;
       const acc = accounts.find(a => a.id === settleAccount);
       const { toLoans, splitPortion } = allocateSettlement(
         selectedPerson.id, settleDirection, amount, applyToLoans,
       );
 
       // One transaction for the full amount — it was one real payment, however
-      // it gets divided between loans and splits below.
-      const { data: tx } = await supabase.from('transactions').insert({
+      // it gets divided between loans and splits below. Skipped for "no account".
+      const { data: tx } = noAccount ? { data: null } : await supabase.from('transactions').insert({
         user_id: user?.id,
         date: new Date(settleDate).toISOString(),
         amount,
@@ -437,7 +454,7 @@ const Splits = () => {
           person_id: selectedPerson.id,
           amount: splitPortion,
           date: settleDate,
-          account_id: settleAccount,
+          account_id: accountId,
           notes: settleNote || null,
           direction: settleDirection,
         });
@@ -673,7 +690,7 @@ const Splits = () => {
                 <>
                   <div className="d-flex justify-content-end gap-2 mb-3">
                     <Button color="primary" size="sm" onClick={openOutingModal}>
-                      <i className="ri-bill-line me-1"></i> Someone Paid for Group
+                      <i className="ri-bill-line me-1"></i> Add Group Outing
                     </Button>
                     <Button color="success" size="sm" onClick={() => openPersonModal()}>
                       <i className="ri-user-add-line me-1"></i> Add Person
@@ -1047,7 +1064,7 @@ const Splits = () => {
       {/* Outing Modal — someone else paid */}
       <Modal isOpen={outingModal} toggle={() => setOutingModal(false)} centered size="lg">
         <ModalHeader toggle={() => setOutingModal(false)}>
-          Add Group Outing — Paid by Someone Else
+          Add Group Outing
         </ModalHeader>
         <ModalBody>
           {error && <Alert color="danger">{error}</Alert>}
@@ -1082,6 +1099,7 @@ const Splits = () => {
                     setOutingParticipants(prev => prev.filter(id => id !== newPayer));
                   }}>
                     <option value="">Select person...</option>
+                    <option value={PAYER_ME}>Me (not recorded as a transaction)</option>
                     {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </Input>
                 </FormGroup>
@@ -1090,7 +1108,9 @@ const Splits = () => {
             <FormGroup>
               <Label>Other Participants</Label>
               <small className="text-muted d-block mb-2">
-                Select everyone else who was there (excluding payer). You are always included.
+                {outingPayer === PAYER_ME
+                  ? 'Select everyone you split with.'
+                  : 'Select everyone else who was there (excluding payer). You are always included.'}
               </small>
               <div className="border rounded p-3">
                 {people.filter(p => p.id !== outingPayer).length === 0 ? (
@@ -1115,7 +1135,29 @@ const Splits = () => {
                 )}
               </div>
             </FormGroup>
-            {outingAmount && outingPayer && (
+            {outingPayer === PAYER_ME && (
+              <div className="form-check mb-3">
+                <input className="form-check-input" type="checkbox" id="outing-include-me"
+                  checked={outingIncludeMe} onChange={e => setOutingIncludeMe(e.target.checked)} />
+                <label className="form-check-label" htmlFor="outing-include-me">
+                  Include me in the split <small className="text-muted">(untick if you paid on their behalf)</small>
+                </label>
+              </div>
+            )}
+            {outingAmount && outingPayer === PAYER_ME && outingParticipants.length > 0 && (() => {
+              const n = outingParticipants.length + (outingIncludeMe ? 1 : 0);
+              return (
+                <Alert color="info" className="py-2 mb-0">
+                  <small>
+                    <strong>{n} {n === 1 ? 'person' : 'people'}</strong> total ({outingIncludeMe ? 'you + ' : ''}{outingParticipants.length} other{outingParticipants.length !== 1 ? 's' : ''})
+                    {' → '}
+                    <strong>Each share: {formatCurrency(Number(outingAmount) / n)}</strong>
+                    {` — they owe you ${outingIncludeMe ? 'their share' : 'the full amount'}. Saved in Splits only; no transaction or account change.`}
+                  </small>
+                </Alert>
+              );
+            })()}
+            {outingAmount && outingPayer && outingPayer !== PAYER_ME && (
               <Alert color="info" className="py-2 mb-0">
                 <small>
                   <strong>{outingParticipants.length + 2} people</strong> total (you + {people.find(p => p.id === outingPayer)?.name} + {outingParticipants.length} other{outingParticipants.length !== 1 ? 's' : ''})
@@ -1289,8 +1331,12 @@ const Splits = () => {
               <Label>{settleDirection === 'received' ? 'Received In' : 'Paid From'} <span className="text-danger">*</span></Label>
               <Input type="select" value={settleAccount} onChange={e => setSettleAccount(e.target.value)}>
                 <option value="">Select account...</option>
+                <option value={NO_ACCOUNT}>No account (Splits only, no transaction)</option>
                 {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
               </Input>
+              {settleAccount === NO_ACCOUNT && (
+                <small className="text-muted">Marks it as {settleDirection === 'received' ? 'received' : 'paid'} in Splits only — no transaction is created and no account balance changes.</small>
+              )}
             </FormGroup>
             <FormGroup>
               <Label>Note</Label>
