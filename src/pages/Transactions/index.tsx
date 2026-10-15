@@ -70,6 +70,8 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
 
   // Loan person name (shown when type is loan_given or loan_received)
   const [loanPersonName, setLoanPersonName] = useState('');
+  // Splits contact for the loan; '__other__' = typed name, not linked
+  const [loanPersonId, setLoanPersonId] = useState('');
 
   document.title = 'Transactions | Finance Portal';
 
@@ -209,6 +211,7 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
   setIsFamilyTx(false);
   setOnBehalfPerson('');
   setLoanPersonName('');
+  setLoanPersonId('');
   validation.resetForm();
 };
 
@@ -233,6 +236,10 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
       }),
     }),
     onSubmit: async (values) => {
+      if (['loan_given', 'loan_received'].includes(values.type) && !loanPersonName.trim()) {
+        setError('Please pick or enter a person for the loan');
+        return;
+      }
       setSaving(true);
       setError('');
       try {
@@ -286,7 +293,9 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
           await supabase.from('loans').insert({
             user_id: user?.id,
             direction: values.type === 'loan_given' ? 'given' : 'taken',
-            person_name: loanPersonName || 'Unknown',
+            person_name: loanPersonName.trim() || 'Unknown',
+            // Linked contacts roll the loan into their Splits balance
+            person_id: loanPersonId && loanPersonId !== '__other__' ? loanPersonId : null,
             principal: amount,
             date: new Date(values.date).toLocaleDateString('en-CA'),
             due_date: null,
@@ -582,13 +591,38 @@ if (recurringEnabled) {
 
             {['loan_given', 'loan_received'].includes(txType) && (
               <FormGroup>
-                <Label>Person Name <span className="text-danger">*</span></Label>
+                <Label>{txType === 'loan_given' ? 'Lent To' : 'Borrowed From'} <span className="text-danger">*</span></Label>
                 <Input
-                  type="text"
-                  placeholder={txType === 'loan_given' ? 'Who did you lend to?' : 'Who did you borrow from?'}
-                  value={loanPersonName}
-                  onChange={e => setLoanPersonName(e.target.value)}
-                />
+                  type="select"
+                  value={loanPersonId}
+                  onChange={e => {
+                    const id = e.target.value;
+                    setLoanPersonId(id);
+                    setLoanPersonName(id && id !== '__other__' ? peopleList.find(p => p.id === id)?.name || '' : '');
+                  }}
+                >
+                  <option value="">Select person...</option>
+                  {peopleList.length > 0 && (
+                    <optgroup label="Splits contacts">
+                      {peopleList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </optgroup>
+                  )}
+                  <option value="__other__">Someone else — type a name…</option>
+                </Input>
+                {loanPersonId === '__other__' && (
+                  <Input
+                    className="mt-2"
+                    type="text"
+                    placeholder={txType === 'loan_given' ? 'Who did you lend to?' : 'Who did you borrow from?'}
+                    value={loanPersonName}
+                    onChange={e => setLoanPersonName(e.target.value)}
+                  />
+                )}
+                <small className="text-muted">
+                  {loanPersonId && loanPersonId !== '__other__'
+                    ? 'Saved in Transactions and Loans, and added to their Splits balance.'
+                    : 'Pick a Splits contact to also show this loan in their Splits balance.'}
+                </small>
               </FormGroup>
             )}
 
