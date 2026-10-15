@@ -9,7 +9,7 @@ interface Account { id: string; name: string; type: string; balance: number; cre
 interface Transaction { id: string; date: string; amount: number; type: string; category: string; note: string; accounts?: { name: string }; is_personal?: boolean; }
 interface Bill { id: string; account_id: string; due_date: string; status: string; statement_amount: number; total_paid: number; accounts?: { name: string }; }
 interface Loan { id: string; direction: string; person_name: string; outstanding: number; }
-interface EMI { id: string; loan_name: string; emi_amount: number; tenure_months: number; paid_count: number; }
+interface EMI { id: string; loan_name: string; emi_amount: number; tenure_months: number; paid_count: number; account_id: string | null; }
 interface Goal { id: string; name: string; target_amount: number; current_amount: number; }
 interface BudgetRule { id: string; category: string; monthly_limit: number; }
 
@@ -85,7 +85,7 @@ const Dashboard = () => {
         .select('id, direction, person_name, outstanding')
         .eq('user_id', user?.id).eq('status', 'active'),
       supabase.from('emis')
-        .select('id, loan_name, emi_amount, tenure_months, paid_count, is_active')
+        .select('id, loan_name, emi_amount, tenure_months, paid_count, is_active, account_id')
         .eq('user_id', user?.id).eq('is_active', true),
       supabase.from('goals')
         .select('id, name, target_amount, current_amount')
@@ -144,8 +144,6 @@ const Dashboard = () => {
     .filter(a => a.type === 'credit_card')
     .reduce((s, a) => s + Number(a.balance), 0);
 
-  const netWorth = bankBalance - creditOutstanding;
-
   const personalTx = transactions.filter(t => t.is_personal !== false);
 
   const monthIncome = personalTx
@@ -168,10 +166,20 @@ const Dashboard = () => {
   const totalOwedToMe  = loansGiven.reduce((s, l) => s + Number(l.outstanding), 0);
   const totalIOwe      = loansTaken.reduce((s, l) => s + Number(l.outstanding), 0);
   const monthlyEMI     = emis.reduce((s, e) => s + Number(e.emi_amount), 0);
-  const emiRemaining   = emis.reduce((s, e) => s + Number(e.emi_amount) * Math.max(0, e.tenure_months - e.paid_count), 0);
+  // Card installment plans are already blocked in the card's outstanding
+  // (limit − available), so only non-card EMIs add to liabilities.
+  const cardIds        = new Set(accounts.filter(a => a.type === 'credit_card').map(a => a.id));
+  const emiRemaining   = emis
+    .filter(e => !e.account_id || !cardIds.has(e.account_id))
+    .reduce((s, e) => s + Number(e.emi_amount) * Math.max(0, e.tenure_months - e.paid_count), 0);
+  const cardEmiCount   = emis.filter(e => e.account_id && cardIds.has(e.account_id)).length;
 
   // Everything you owe: card outstanding + loans taken + remaining EMIs + Splits you owe
   const totalLiabilities = creditOutstanding + totalIOwe + emiRemaining + splitsYouOwe;
+
+  // Net worth = assets (bank & cash + money owed to you) − all liabilities
+  const totalReceivables = totalOwedToMe + splitsPending;
+  const netWorth = bankBalance + totalReceivables - totalLiabilities;
 
   const categorySpend: Record<string, number> = {};
   personalTx
@@ -225,13 +233,18 @@ const Dashboard = () => {
                     <div>
                       <p className="text-muted mb-1 fs-13">Net Worth</p>
                       <h4 className={netWorth >= 0 ? 'text-success' : 'text-danger'}>{formatCurrency(netWorth)}</h4>
-                      <small className="text-muted">Bank − Credit Cards</small>
+                      <small className="text-muted">Assets − Liabilities</small>
                     </div>
                     <div className="avatar-sm">
                       <span className="avatar-title bg-success-subtle rounded-circle fs-3">
                         <i className="ri-funds-line text-success"></i>
                       </span>
                     </div>
+                  </div>
+                  <div className="fs-12 text-muted mt-1">
+                    <div className="d-flex justify-content-between"><span>Bank & cash</span><span>{formatCurrency(bankBalance)}</span></div>
+                    <div className="d-flex justify-content-between"><span>Owed to you (loans + splits)</span><span>{formatCurrency(totalReceivables)}</span></div>
+                    <div className="d-flex justify-content-between"><span>Liabilities</span><span>−{formatCurrency(totalLiabilities)}</span></div>
                   </div>
                 </CardBody>
               </Card>
@@ -289,7 +302,7 @@ const Dashboard = () => {
                   <div className="fs-12 text-muted mt-1">
                     <div className="d-flex justify-content-between"><span>Credit cards</span><span>{formatCurrency(creditOutstanding)}</span></div>
                     <div className="d-flex justify-content-between"><span>Loans taken</span><span>{formatCurrency(totalIOwe)}</span></div>
-                    <div className="d-flex justify-content-between"><span>EMIs remaining</span><span>{formatCurrency(emiRemaining)}</span></div>
+                    <div className="d-flex justify-content-between"><span>EMIs remaining{cardEmiCount > 0 ? ` (${cardEmiCount} card EMI${cardEmiCount > 1 ? 's' : ''} in card)` : ''}</span><span>{formatCurrency(emiRemaining)}</span></div>
                     <div className="d-flex justify-content-between"><span>Splits you owe</span><span>{formatCurrency(splitsYouOwe)}</span></div>
                   </div>
                 </CardBody>
