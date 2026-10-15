@@ -55,6 +55,7 @@ const NO_ACCOUNT = 'none';
 const Splits = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('people');
+  const [peopleFilter, setPeopleFilter] = useState<'all' | 'to_receive' | 'to_pay' | 'settled'>('all');
   const [people, setPeople] = useState<Person[]>([]);
   const [outings, setOutings] = useState<Outing[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
@@ -78,6 +79,8 @@ const Splits = () => {
   const [personOpeningBalance, setPersonOpeningBalance] = useState('');
 
   const [settleAmount, setSettleAmount] = useState('');
+  // Part of settleAmount that actually moved through the account; '' = all of it
+  const [settleViaAccount, setSettleViaAccount] = useState('');
   const [settleAccount, setSettleAccount] = useState('');
   const [settleDate, setSettleDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [settleNote, setSettleNote] = useState('');
@@ -385,6 +388,7 @@ const Splits = () => {
     const dir: 'received' | 'paid' = balance >= 0 ? 'received' : 'paid';
     setSettleDirection(dir);
     setSettleAmount(String(Math.abs(balance)));
+    setSettleViaAccount('');
     setSettleAccount('');
     setSettleDate(new Date().toLocaleDateString('en-CA'));
     setSettleNote('');
@@ -404,6 +408,12 @@ const Splits = () => {
       const amount = Number(settleAmount);
       const noAccount = settleAccount === NO_ACCOUNT;
       const accountId = noAccount ? null : settleAccount;
+      // Only this much touches the account; the rest is settled off-account
+      const viaAccount = noAccount ? 0 : settleViaAccount === '' ? amount : Number(settleViaAccount);
+      if (!noAccount && (viaAccount <= 0 || viaAccount > amount)) {
+        throw new Error('Amount via account must be more than 0 and not more than the total settled');
+      }
+      const offAccount = amount - viaAccount;
       const acc = accounts.find(a => a.id === settleAccount);
       const { toLoans, splitPortion } = allocateSettlement(
         selectedPerson.id, settleDirection, amount, applyToLoans,
@@ -414,7 +424,7 @@ const Splits = () => {
       const { data: tx } = noAccount ? { data: null } : await supabase.from('transactions').insert({
         user_id: user?.id,
         date: new Date(settleDate).toISOString(),
-        amount,
+        amount: viaAccount,
         type: settleDirection === 'received' ? 'reimbursement_received' : 'expense',
         account_id: settleAccount,
         category: settleDirection === 'received' ? 'Reimbursement' : 'Split Settlement',
@@ -424,7 +434,7 @@ const Splits = () => {
       }).select().single();
 
       if (acc) {
-        const newBalance = settleDirection === 'received' ? acc.balance + amount : acc.balance - amount;
+        const newBalance = settleDirection === 'received' ? acc.balance + viaAccount : acc.balance - viaAccount;
         await supabase.from('accounts').update({ balance: newBalance }).eq('id', settleAccount);
       }
 
@@ -455,7 +465,8 @@ const Splits = () => {
           amount: splitPortion,
           date: settleDate,
           account_id: accountId,
-          notes: settleNote || null,
+          notes: [settleNote, offAccount > 0 ? `${formatCurrency(offAccount)} settled without account` : '']
+            .filter(Boolean).join(' · ') || null,
           direction: settleDirection,
         });
         if (settleErr) throw new Error(settleErr.message);
@@ -688,13 +699,32 @@ const Splits = () => {
                 <div className="text-center py-5"><Spinner color="primary" /></div>
               ) : activeTab === 'people' ? (
                 <>
-                  <div className="d-flex justify-content-end gap-2 mb-3">
+                  <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <div className="d-flex flex-wrap gap-1">
+                      {(() => {
+                        const balances = people.map(p => getPersonTab(p.id).balance);
+                        const filters: { key: typeof peopleFilter; label: string; count: number; color: string }[] = [
+                          { key: 'all', label: 'All', count: people.length, color: 'secondary' },
+                          { key: 'to_receive', label: 'Pending (they owe you)', count: balances.filter(b => b > 0).length, color: 'warning' },
+                          { key: 'to_pay', label: 'To be paid (you owe)', count: balances.filter(b => b < 0).length, color: 'danger' },
+                          { key: 'settled', label: 'Settled', count: balances.filter(b => b === 0).length, color: 'success' },
+                        ];
+                        return filters.map(f => (
+                          <Button key={f.key} size="sm" color={peopleFilter === f.key ? f.color : `soft-${f.color}`}
+                            onClick={() => setPeopleFilter(f.key)}>
+                            {f.label} <Badge color="light" className="text-dark ms-1">{f.count}</Badge>
+                          </Button>
+                        ));
+                      })()}
+                    </div>
+                    <div className="d-flex gap-2">
                     <Button color="primary" size="sm" onClick={openOutingModal}>
                       <i className="ri-bill-line me-1"></i> Add Group Outing
                     </Button>
                     <Button color="success" size="sm" onClick={() => openPersonModal()}>
                       <i className="ri-user-add-line me-1"></i> Add Person
                     </Button>
+                    </div>
                   </div>
                   {people.length === 0 ? (
                     <div className="text-center py-5">
@@ -703,7 +733,13 @@ const Splits = () => {
                     </div>
                   ) : (
                     <Row>
-                      {people.map(person => {
+                      {people.filter(person => {
+                        if (peopleFilter === 'all') return true;
+                        const { balance } = getPersonTab(person.id);
+                        return peopleFilter === 'to_receive' ? balance > 0
+                          : peopleFilter === 'to_pay' ? balance < 0
+                          : balance === 0;
+                      }).map(person => {
                         const { personOutings, paidByPersonOutings, openingBalance, outingOwed, userOwesToPerson, receivedSettlements, paidSettlements, loansGivenOut, loansTakenOut, balance } = getPersonTab(person.id);
                         const grossOwed = openingBalance + outingOwed + loansGivenOut;
                         const totalActivity = grossOwed + userOwesToPerson + loansTakenOut;
@@ -1285,7 +1321,7 @@ const Splits = () => {
               <Input type="date" value={settleDate} onChange={e => setSettleDate(e.target.value)} />
             </FormGroup>
             <FormGroup>
-              <Label>Amount (PKR) <span className="text-danger">*</span></Label>
+              <Label>Amount Settled (PKR) <span className="text-danger">*</span></Label>
               <Input type="number" value={settleAmount} onChange={e => setSettleAmount(e.target.value)} />
               {selectedPerson && getOpenLoans(selectedPerson.id, settleDirection === 'received' ? 'given' : 'taken').length > 0 && (() => {
                 const { toLoans, loanTotal, splitPortion } = allocateSettlement(
@@ -1338,6 +1374,25 @@ const Splits = () => {
                 <small className="text-muted">Marks it as {settleDirection === 'received' ? 'received' : 'paid'} in Splits only — no transaction is created and no account balance changes.</small>
               )}
             </FormGroup>
+            {settleAccount && settleAccount !== NO_ACCOUNT && (() => {
+              const total = Number(settleAmount) || 0;
+              const via = settleViaAccount === '' ? total : Number(settleViaAccount) || 0;
+              const rest = total - via;
+              return (
+                <FormGroup>
+                  <Label>Amount {settleDirection === 'received' ? 'received in' : 'paid from'} {accounts.find(a => a.id === settleAccount)?.name}</Label>
+                  <Input type="number" value={settleViaAccount} placeholder={String(total)}
+                    onChange={e => setSettleViaAccount(e.target.value)} />
+                  <small className={`d-block mt-1 ${rest < 0 ? 'text-danger' : 'text-muted'}`}>
+                    {rest > 0
+                      ? `Settling ${formatCurrency(total)}: ${formatCurrency(via)} through the account + ${formatCurrency(rest)} without account.`
+                      : rest < 0
+                        ? 'Can’t be more than the amount settled.'
+                        : 'Leave as is if the full amount went through this account.'}
+                  </small>
+                </FormGroup>
+              );
+            })()}
             <FormGroup>
               <Label>Note</Label>
               <Input type="text" value={settleNote} onChange={e => setSettleNote(e.target.value)}
