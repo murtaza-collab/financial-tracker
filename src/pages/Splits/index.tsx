@@ -3,6 +3,7 @@ import { Container, Row, Col, Card, CardBody, CardHeader, Button, Modal, ModalHe
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
+import { balanceAfter, accountOptionLabel } from '../../lib/balances';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 
 interface Person { id: string; name: string; phone: string; email: string | null; notes: string; opening_balance: number; linked_user_id: string | null; link_status: string | null; }
@@ -434,7 +435,7 @@ const Splits = () => {
       }).select().single();
 
       if (acc) {
-        const newBalance = settleDirection === 'received' ? acc.balance + viaAccount : acc.balance - viaAccount;
+        const newBalance = balanceAfter(acc.balance, acc.type, settleDirection === 'received' ? 'in' : 'out', viaAccount);
         await supabase.from('accounts').update({ balance: newBalance }).eq('id', settleAccount);
       }
 
@@ -1368,7 +1369,7 @@ const Splits = () => {
               <Input type="select" value={settleAccount} onChange={e => setSettleAccount(e.target.value)}>
                 <option value="">Select account...</option>
                 <option value={NO_ACCOUNT}>No account (Splits only, no transaction)</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                {accounts.map(a => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
               </Input>
               {settleAccount === NO_ACCOUNT && (
                 <small className="text-muted">Marks it as {settleDirection === 'received' ? 'received' : 'paid'} in Splits only — no transaction is created and no account balance changes.</small>

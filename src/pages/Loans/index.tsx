@@ -5,6 +5,7 @@ import { useFormik } from 'formik';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
+import { balanceAfter, accountOptionLabel } from '../../lib/balances';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 import { useLocation } from 'react-router-dom';
 
@@ -141,9 +142,7 @@ useEffect(() => {
           });
 
           if (acc) {
-            const newBalance = values.direction === 'given'
-              ? acc.balance - amount
-              : acc.balance + amount;
+            const newBalance = balanceAfter(acc.balance, acc.type, values.direction === 'given' ? 'out' : 'in', amount);
             await supabase.from('accounts').update({ balance: newBalance }).eq('id', values.account_id);
           }
         }
@@ -294,7 +293,7 @@ useEffect(() => {
 
       if (!repayAlreadyPaid) {
         const { data: freshAcc } = await supabase
-          .from('accounts').select('balance').eq('id', repayAccount).single();
+          .from('accounts').select('balance, type').eq('id', repayAccount).single();
 
         // Create transaction
         const { data: tx } = await supabase.from('transactions').insert({
@@ -310,9 +309,7 @@ useEffect(() => {
 
         // Update account balance
         if (freshAcc) {
-          const newBalance = selectedLoan.direction === 'given'
-            ? freshAcc.balance + amount
-            : freshAcc.balance - amount;
+          const newBalance = balanceAfter(freshAcc.balance, freshAcc.type, selectedLoan.direction === 'given' ? 'in' : 'out', amount);
           await supabase.from('accounts').update({ balance: newBalance }).eq('id', repayAccount);
         }
       }
@@ -687,7 +684,7 @@ useEffect(() => {
                     onChange={loanForm.handleChange}
                   >
                     <option value="">Select account...</option>
-                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                    {accounts.map(a => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
                   </Input>
                 </FormGroup>
               )}
@@ -813,7 +810,7 @@ useEffect(() => {
                 <Label>{selectedLoan?.direction === 'given' ? 'Received In' : 'Paid From'} <span className="text-danger">*</span></Label>
                 <Input type="select" value={repayAccount} onChange={e => setRepayAccount(e.target.value)}>
                   <option value="">Select account...</option>
-                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                  {accounts.map(a => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
                 </Input>
               </FormGroup>
             )}

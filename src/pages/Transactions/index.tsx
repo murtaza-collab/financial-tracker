@@ -5,6 +5,7 @@ import { useFormik } from 'formik';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
+import { balanceAfter, isCard, accountOptionLabel } from '../../lib/balances';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 import DeleteModal from '../../Components/Common/DeleteModal';
 import { useCategories } from '../../hooks/useCategories';
@@ -123,6 +124,12 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
   useEffect(() => { fetchTransactions(); }, [filterType, filterAccount, filterCategory, currentPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDeleteClick = (tx: Transaction) => {
+    // A card payment is tied to a bill on the Credit Cards page; removing it there
+    // reverses both balances and the bill's paid total together.
+    if (tx.type === 'credit_card_payment') {
+      alert('Card payments are removed from the Credit Cards page (open the bill and remove the payment), so the bill and both balances stay in sync.');
+      return;
+    }
     setTxToDelete(tx);
     setDeleteModal(true);
   };
@@ -141,27 +148,18 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
       const bal = (id: string) => freshAccounts?.find(a => a.id === id)?.balance ?? 0;
       const accType = (id: string) => freshAccounts?.find(a => a.id === id)?.type ?? '';
 
-      // Reverse account balance(s)
-      if (['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(tx.type)) {
-        // Credit card: outstanding was increased, so reverse by subtracting. Bank/cash: was debited, add back.
-        const reversed = accType(tx.account_id) === 'credit_card'
-          ? bal(tx.account_id) - amount
-          : bal(tx.account_id) + amount;
-        await supabase.from('accounts').update({ balance: reversed }).eq('id', tx.account_id);
+      // Reverse account balance(s) — undo the flow, i.e. apply it the other way
+      const undo = (id: string, flow: 'out' | 'in') =>
+        supabase.from('accounts').update({ balance: balanceAfter(bal(id), accType(id), flow, amount) }).eq('id', id);
+      // Card installment plans are already blocked in the card's outstanding, so paying one never moved it
+      const cardEmi = tx.type === 'emi_payment' && isCard(accType(tx.account_id));
+      if (['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(tx.type) && !cardEmi) {
+        await undo(tx.account_id, 'in');
       } else if (['income', 'reimbursement_received', 'loan_received'].includes(tx.type)) {
-        // Credit card: income reduced outstanding, so restore by adding back. Bank/cash: add back.
-        const reversed = accType(tx.account_id) === 'credit_card'
-          ? bal(tx.account_id) + amount
-          : bal(tx.account_id) - amount;
-        await supabase.from('accounts').update({ balance: reversed }).eq('id', tx.account_id);
-      } else if (tx.type === 'transfer' && tx.to_account_id) {
-        await supabase.from('accounts').update({ balance: bal(tx.account_id) + amount }).eq('id', tx.account_id);
-        await supabase.from('accounts').update({ balance: bal(tx.to_account_id) - amount }).eq('id', tx.to_account_id);
-      } else if (tx.type === 'atm_withdrawal') {
-        await supabase.from('accounts').update({ balance: bal(tx.account_id) + amount }).eq('id', tx.account_id);
-        if (tx.to_account_id) {
-          await supabase.from('accounts').update({ balance: bal(tx.to_account_id) - amount }).eq('id', tx.to_account_id);
-        }
+        await undo(tx.account_id, 'out');
+      } else if (['transfer', 'atm_withdrawal'].includes(tx.type)) {
+        await undo(tx.account_id, 'in');
+        if (tx.to_account_id) await undo(tx.to_account_id, 'out');
       }
 
       // Reverse linked loan repayment (if this tx was logged as a repayment)
@@ -267,25 +265,19 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
         if (txError) throw txError;
 
         // Update account balances
-        const isCreditCard = sourceAccount?.type === 'credit_card';
-        if (['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(values.type)) {
-          // Credit card: outstanding increases. Bank/cash: balance decreases.
-          const newBal = isCreditCard ? sourceAccount.balance + amount : sourceAccount.balance - amount;
-          await supabase.from('accounts').update({ balance: newBal }).eq('id', values.account_id);
+        // Credit cards move the opposite way to bank/cash — see lib/balances
+        const apply = (acc: { id: string; type: string; balance: number }, flow: 'out' | 'in') =>
+          supabase.from('accounts').update({ balance: balanceAfter(acc.balance, acc.type, flow, amount) }).eq('id', acc.id);
+        const destAccount = freshAccs?.find(a => a.id === values.to_account_id);
+        // Card installment plans are already blocked in the card's outstanding
+        const cardEmi = values.type === 'emi_payment' && isCard(sourceAccount.type);
+        if (['expense', 'loan_given', 'emi_payment', 'goal_contribution'].includes(values.type) && !cardEmi) {
+          await apply(sourceAccount, 'out');
         } else if (['income', 'reimbursement_received', 'loan_received'].includes(values.type)) {
-          // Credit card: income reduces outstanding. Bank/cash: income increases balance.
-          const newBal = isCreditCard ? sourceAccount.balance - amount : sourceAccount.balance + amount;
-          await supabase.from('accounts').update({ balance: newBal }).eq('id', values.account_id);
-        } else if (values.type === 'transfer') {
-          const destAccount = freshAccs?.find(a => a.id === values.to_account_id);
-          await supabase.from('accounts').update({ balance: (sourceAccount.balance - amount) }).eq('id', values.account_id);
-          if (destAccount) await supabase.from('accounts').update({ balance: (destAccount.balance + amount) }).eq('id', values.to_account_id);
-        } else if (values.type === 'atm_withdrawal') {
-          await supabase.from('accounts').update({ balance: (sourceAccount.balance - amount) }).eq('id', values.account_id);
-          if (values.to_account_id) {
-            const cashAccount = freshAccs?.find(a => a.id === values.to_account_id);
-            if (cashAccount) await supabase.from('accounts').update({ balance: (cashAccount.balance + amount) }).eq('id', values.to_account_id);
-          }
+          await apply(sourceAccount, 'in');
+        } else if (['transfer', 'atm_withdrawal'].includes(values.type)) {
+          await apply(sourceAccount, 'out');
+          if (destAccount) await apply(destAccount, 'in');
         }
 
         // Create loan record for loan_given / loan_received
@@ -658,7 +650,7 @@ if (recurringEnabled) {
                   invalid={validation.touched.to_account_id && !!validation.errors.to_account_id}
                 >
                   <option value="">Select account...</option>
-                  {toAccountOptions.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                  {toAccountOptions.map(a => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
                 </Input>
                 {validation.touched.to_account_id && validation.errors.to_account_id && <FormFeedback>{validation.errors.to_account_id}</FormFeedback>}
               </FormGroup>

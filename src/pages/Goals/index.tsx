@@ -5,6 +5,7 @@ import { useFormik } from 'formik';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
+import { balanceAfter, accountOptionLabel } from '../../lib/balances';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 
 interface Account { id: string; name: string; type: string; balance: number; }
@@ -120,11 +121,11 @@ const Goals = () => {
       const amount = Number(contribAmount);
 
       const { data: freshFrom } = await supabase
-        .from('accounts').select('balance, name').eq('id', contribAccount).single();
+        .from('accounts').select('balance, name, type').eq('id', contribAccount).single();
       const { data: freshTo } = await supabase
-        .from('accounts').select('balance').eq('id', selectedGoal.account_id).single();
+        .from('accounts').select('balance, type').eq('id', selectedGoal.account_id).single();
 
-      if (!freshFrom || freshFrom.balance < amount) {
+      if (!freshFrom || (freshFrom.type !== 'credit_card' && freshFrom.balance < amount)) {
         setError('Insufficient balance in selected account');
         setSaving(false);
         return;
@@ -145,12 +146,12 @@ const Goals = () => {
 
       // Debit from account
       await supabase.from('accounts')
-        .update({ balance: freshFrom.balance - amount })
+        .update({ balance: balanceAfter(freshFrom.balance, freshFrom.type, 'out', amount) })
         .eq('id', contribAccount);
 
       // Credit to savings account
       await supabase.from('accounts')
-        .update({ balance: (freshTo?.balance || 0) + amount })
+        .update({ balance: balanceAfter(freshTo?.balance || 0, freshTo?.type, 'in', amount) })
         .eq('id', selectedGoal.account_id);
 
       // Create goal contribution record
@@ -414,7 +415,7 @@ const Goals = () => {
                 invalid={goalForm.touched.account_id && !!goalForm.errors.account_id}
               >
                 <option value="">Select dedicated savings account...</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                {accounts.map(a => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
               </Input>
               <small className="text-muted">This is where your saved money will be transferred to</small>
             </FormGroup>
@@ -477,7 +478,7 @@ const Goals = () => {
                 <option value="">Select account to transfer from...</option>
                 {accounts
                   .filter(a => a.id !== selectedGoal?.account_id)
-                  .map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                  .map(a => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
               </Input>
               {selectedGoal && (
                 <small className="text-muted">

@@ -3,6 +3,7 @@ import { Container, Row, Col, Card, CardBody, CardHeader, Button, Modal, ModalHe
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
+import { balanceAfter, accountOptionLabel } from '../../lib/balances';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 import { useCategories } from '../../hooks/useCategories';
 
@@ -169,7 +170,7 @@ const Recurring = () => {
     try {
       const amount = Number(confirmAmount);
       const { data: freshAcc } = await supabase
-        .from('accounts').select('balance').eq('id', confirmAccount).single();
+        .from('accounts').select('balance, type').eq('id', confirmAccount).single();
 
       // Create transaction
       await supabase.from('transactions').insert({
@@ -186,7 +187,7 @@ const Recurring = () => {
       if (freshAcc) {
         const isIncome = ['income', 'reimbursement_received', 'loan_received'].includes(selectedRule.type);
         await supabase.from('accounts').update({
-          balance: isIncome ? freshAcc.balance + amount : freshAcc.balance - amount,
+          balance: balanceAfter(freshAcc.balance, freshAcc.type, isIncome ? 'in' : 'out', amount),
         }).eq('id', confirmAccount);
       }
 
@@ -421,7 +422,7 @@ const Recurring = () => {
               <Label>Account <span className="text-danger">*</span></Label>
               <Input type="select" value={ruleAccount} onChange={e => setRuleAccount(e.target.value)}>
                 <option value="">Select account...</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                {accounts.map(a => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
               </Input>
             </FormGroup>
             <Row>
@@ -512,7 +513,7 @@ const Recurring = () => {
               <Label>Account <span className="text-danger">*</span></Label>
               <Input type="select" value={confirmAccount} onChange={e => setConfirmAccount(e.target.value)}>
                 <option value="">Select account...</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                {accounts.map(a => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
               </Input>
             </FormGroup>
             <FormGroup>

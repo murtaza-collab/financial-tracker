@@ -5,6 +5,7 @@ import { useFormik } from 'formik';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../lib/currency';
+import { isCard, accountOptionLabel } from '../../lib/balances';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 
 interface Account { id: string; name: string; type: string; balance: number; }
@@ -160,7 +161,7 @@ const EMIs = () => {
     setError('');
     try {
       const { data: freshAcc } = await supabase
-        .from('accounts').select('balance').eq('id', payAccount).single();
+        .from('accounts').select('balance, type').eq('id', payAccount).single();
 
       // Create transaction
       const { data: tx } = await supabase.from('transactions').insert({
@@ -174,8 +175,9 @@ const EMIs = () => {
         note: `${selectedEMI.loan_name} — Month ${selectedPayment.month}`,
       }).select().single();
 
-      // Debit account
-      if (freshAcc) {
+      // Debit account. A card installment plan is already blocked in the card's
+      // outstanding (limit − available), so paying it leaves the card balance as is.
+      if (freshAcc && !isCard(freshAcc.type)) {
         await supabase.from('accounts')
           .update({ balance: freshAcc.balance - selectedEMI.emi_amount })
           .eq('id', payAccount);
@@ -596,7 +598,7 @@ const EMIs = () => {
               <Label>Debit From <span className="text-danger">*</span></Label>
               <Input type="select" value={payAccount} onChange={e => setPayAccount(e.target.value)}>
                 <option value="">Select account...</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance)}</option>)}
+                {accounts.map(a => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
               </Input>
             </FormGroup>
           </Form>

@@ -418,13 +418,18 @@ const CreditCards = () => {
 
       await supabase.from('bill_payments').delete().eq('id', payment.id);
 
-      // Also delete linked transaction (credit_card_payment type for this bill)
-      await supabase.from('transactions')
-        .delete()
-        .eq('account_id', payment.account_id)
-        .eq('to_account_id', bill.account_id)
-        .eq('type', 'credit_card_payment')
-        .eq('amount', amount);
+      // Also delete the linked transaction (credit_card_payment for this bill) — just
+      // one, preferring the same date, so other payments of the same amount survive
+      if (isRealPayment) {
+        const { data: matches } = await supabase.from('transactions')
+          .select('id, date')
+          .eq('account_id', payment.account_id)
+          .eq('to_account_id', bill.account_id)
+          .eq('type', 'credit_card_payment')
+          .eq('amount', amount);
+        const linked = matches?.find(t => t.date?.slice(0, 10) === payment.paid_date) ?? matches?.[0];
+        if (linked) await supabase.from('transactions').delete().eq('id', linked.id);
+      }
 
       const { data: remaining } = await supabase.from('bill_payments').select('amount').eq('bill_id', bill.id);
       const newTotalPaid = (remaining || []).reduce((s: number, p: any) => s + Number(p.amount), 0);
