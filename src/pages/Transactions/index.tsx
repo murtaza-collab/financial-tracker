@@ -315,27 +315,6 @@ const [recurringStartDate, setRecurringStartDate] = useState(new Date().toLocale
             notes: values.note || null,
           }).select().single();
 
-          // Handle recurring
-if (recurringEnabled) {
-  const intervalDays = recurringFrequency === 'daily' ? 1
-    : recurringFrequency === 'weekly' ? 7 : 30;
-
-  const { error: rrErr } = await supabase.from('recurring_rules').insert({
-    user_id: user?.id,
-    name: values.note || values.category || 'Recurring Transaction',
-    amount,
-    type: values.type,
-    account_id: values.account_id,
-    category: values.category || null,
-    note: values.note || null,
-    frequency: recurringFrequency,
-    interval_days: intervalDays,
-    next_date: recurringStartDate,
-    is_active: true,
-  });
-  if (rrErr) console.error('Failed to create recurring rule:', rrErr.message);
-}
-
           if (outing) {
             const participants = selectedPeople.map(personId => ({
               outing_id: outing.id,
@@ -369,6 +348,24 @@ if (recurringEnabled) {
               share_amount: amount,
             });
           }
+        }
+
+        // Recurring rule — shows up on the Recurring page for future months
+        if (recurringEnabled && ['expense', 'income'].includes(values.type)) {
+          const { error: rrErr } = await supabase.from('recurring_rules').insert({
+            user_id: user?.id,
+            name: values.note || values.category || 'Recurring Transaction',
+            amount,
+            type: values.type,
+            account_id: values.account_id,
+            category: values.category || null,
+            note: values.note || null,
+            frequency: recurringFrequency,
+            interval_days: recurringFrequency === 'daily' ? 1 : recurringFrequency === 'weekly' ? 7 : 30,
+            next_date: recurringStartDate,
+            is_active: true,
+          });
+          if (rrErr) throw new Error(`Transaction saved, but the recurring rule failed: ${rrErr.message}`);
         }
 
         toggleModal();
@@ -793,7 +790,8 @@ if (recurringEnabled) {
                 )}
               </div>
             )}
-            {/* Recurring Toggle */}
+            {/* Recurring Toggle — the Recurring page handles income and expense rules */}
+{['expense', 'income'].includes(txType) && (
 <div className="mt-2">
   <div className="form-check form-switch mb-2">
     <input
@@ -831,6 +829,7 @@ if (recurringEnabled) {
     </div>
   )}
 </div>
+)}
           </Form>
         </ModalBody>
         <ModalFooter>
