@@ -9,7 +9,7 @@ import { balanceAfter, accountOptionLabel } from '../../lib/balances';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 import { useLocation } from 'react-router-dom';
 
-interface Account { id: string; name: string; type: string; balance: number; }
+interface Account { id: string; name: string; type: string; balance: number; credit_limit?: number; }
 interface SplitPerson { id: string; name: string; }
 interface Loan {
   id: string; direction: string; person_name: string; principal: number;
@@ -72,7 +72,7 @@ useEffect(() => {
   const fetchData = async () => {
     setLoading(true);
     const { data: accData } = await supabase
-      .from('accounts').select('id, name, type, balance')
+      .from('accounts').select('id, name, type, balance, credit_limit')
       .eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true });
 
     const { data: loanData } = await supabase

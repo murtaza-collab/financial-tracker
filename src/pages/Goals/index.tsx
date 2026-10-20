@@ -8,7 +8,7 @@ import { formatCurrency } from '../../lib/currency';
 import { balanceAfter, accountOptionLabel } from '../../lib/balances';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 
-interface Account { id: string; name: string; type: string; balance: number; }
+interface Account { id: string; name: string; type: string; balance: number; credit_limit?: number; }
 interface Goal {
   id: string; name: string; target_amount: number; target_date: string;
   account_id: string; current_amount: number; status: string;
@@ -37,7 +37,7 @@ const Goals = () => {
   const fetchData = async () => {
     setLoading(true);
     const { data: accData } = await supabase
-      .from('accounts').select('id, name, type, balance')
+      .from('accounts').select('id, name, type, balance, credit_limit')
       .eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true });
 
     const { data: goalData } = await supabase

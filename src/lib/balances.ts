@@ -17,6 +17,6 @@ export const balanceAfter = (
   return Number(balance) + sign * Number(amount);
 };
 
-// Dropdown label: a card's balance is debt, so don't show it like money you have
-export const accountOptionLabel = (a: { name: string; type?: string | null; balance: number }) =>
-  `${a.name} — ${isCard(a.type) ? `Outstanding: ${formatCurrency(a.balance)}` : formatCurrency(a.balance)}`;
+// Dropdown label: a card's balance is debt, so show what's left to spend instead
+export const accountOptionLabel = (a: { name: string; type?: string | null; balance: number; credit_limit?: number | null }) =>
+  `${a.name} — ${isCard(a.type) ? `Available: ${formatCurrency(Number(a.credit_limit ?? 0) - Number(a.balance))}` : formatCurrency(a.balance)}`;

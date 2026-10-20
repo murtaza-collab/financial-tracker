@@ -119,7 +119,7 @@ const CreditCards = () => {
     // Fetch cards and bank accounts in parallel
     const [{ data: cardData }, { data: bankData }] = await Promise.all([
       supabase.from('accounts').select('*').eq('user_id', user?.id).eq('type', 'credit_card').eq('is_archived', false).order('name', { ascending: true }),
-      supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false).in('type', ['bank_savings', 'bank_current', 'cash', 'custom_wallet', 'credit_card']).order('name', { ascending: true }),
+      supabase.from('accounts').select('id, name, balance, type, credit_limit').eq('user_id', user?.id).eq('is_archived', false).in('type', ['bank_savings', 'bank_current', 'cash', 'custom_wallet', 'credit_card']).order('name', { ascending: true }),
     ]);
 
     if (cardData) {
@@ -650,6 +650,12 @@ const CreditCards = () => {
                         <h4 className={card.balance < 0 ? 'text-success' : 'text-danger'}>{formatCurrency(Math.abs(card.balance))}{card.balance < 0 ? ' CR' : ''}</h4>
                         <Progress value={Math.max(0, utilization)} color={utilization > 80 ? 'danger' : utilization > 60 ? 'warning' : 'success'} style={{ height: 6 }} className="mb-1" />
                         <small className="text-muted">{Math.max(0, utilization).toFixed(1)}% of {formatCurrency(card.credit_limit)} utilized</small>
+                        {card.credit_limit > 0 && (
+                          <div className="mt-2">
+                            <p className="text-muted mb-0 fs-12">Available Limit</p>
+                            <h5 className="text-success mb-0">{formatCurrency(card.credit_limit - card.balance)}</h5>
+                          </div>
+                        )}
 
                         {daysUntil !== null && bill?.due_date && bill.status !== 'paid' && (
                           <div className={`mt-3 p-2 rounded bg-${daysUntil < 0 ? 'danger' : daysUntil <= 3 ? 'warning' : 'info'}-subtle`}>
@@ -927,7 +933,7 @@ const CreditCards = () => {
                       <optgroup key={g.label} label={g.label}>
                         {g.accounts.map(a => (
                           <option key={a.id} value={a.id}>
-                            {a.name} — {a.type === 'credit_card' ? `Outstanding: ${formatCurrency(a.balance)}` : formatCurrency(a.balance)}
+                            {a.name} — {a.type === 'credit_card' ? `Available: ${formatCurrency((a.credit_limit ?? 0) - a.balance)}` : formatCurrency(a.balance)}
                           </option>
                         ))}
                       </optgroup>

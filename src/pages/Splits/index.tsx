@@ -114,7 +114,7 @@ const Splits = () => {
       supabase.from('split_people').select('*').eq('user_id', user?.id).order('name'),
       supabase.from('outings').select('*, outing_participants(person_id, share_amount, split_people(name))').eq('user_id', user?.id).order('date', { ascending: false }),
       supabase.from('settlements').select('*, accounts!settlements_account_id_fkey(name)').eq('user_id', user?.id).order('date', { ascending: false }),
-      supabase.from('accounts').select('id, name, balance, type').eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true }),
+      supabase.from('accounts').select('id, name, balance, type, credit_limit').eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true }),
       // Only loans tied to a contact; oldest first so settlements clear them FIFO
       supabase.from('loans').select('id, person_id, person_name, direction, outstanding, date, status')
         .eq('user_id', user?.id).not('person_id', 'is', null).order('date', { ascending: true }),

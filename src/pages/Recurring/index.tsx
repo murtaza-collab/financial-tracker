@@ -7,7 +7,7 @@ import { balanceAfter, accountOptionLabel } from '../../lib/balances';
 import BreadCrumb from '../../Components/Common/BreadCrumb';
 import { useCategories } from '../../hooks/useCategories';
 
-interface Account { id: string; name: string; type: string; balance: number; }
+interface Account { id: string; name: string; type: string; balance: number; credit_limit?: number; }
 interface RecurringRule {
   id: string; name: string; amount: number; type: string;
   account_id: string; category: string; note: string;
@@ -80,7 +80,7 @@ const Recurring = () => {
   const fetchData = async () => {
     setLoading(true);
     const [{ data: accData }, { data: rulesData, error: rulesError }] = await Promise.all([
-      supabase.from('accounts').select('id, name, type, balance')
+      supabase.from('accounts').select('id, name, type, balance, credit_limit')
         .eq('user_id', user?.id).eq('is_archived', false).order('name', { ascending: true }),
       supabase.from('recurring_rules')
         .select('*')
