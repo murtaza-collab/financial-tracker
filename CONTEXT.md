@@ -142,7 +142,7 @@ financial-tracker/
   name: string
   bank_name: string
   type: 'bank_savings' | 'bank_current' | 'credit_card' | 'cash' | 'custom_wallet'
-  balance: number
+  balance: number           // bank/cash: money held · credit_card: outstanding owed (limit − available)
   credit_limit?: number     // credit cards only
   billing_date?: number     // credit cards only
   due_date?: number         // credit cards only
@@ -293,6 +293,7 @@ File: `src/Layouts/LayoutMenuData.tsx`
 
 | Date | Item | Status |
 |------|------|--------|
+| 2026-10-21 | Loans + Splits compute the new account balance from page-load state, not a fresh fetch — can overwrite a balance changed in another tab | ⚠️ Open |
 | 2026-07-23 | No SMTP configured — forgot-password disabled; set up Resend/Brevo before launch, then un-hide the link | ⚠️ Open |
 | 2026-07-23 | Supabase Site URL + Google redirect URIs point at `localhost:3000` — switch to real domain at launch | ⚠️ Open |
 | 2026-07-23 | 4 commits local, not yet pushed | ⚠️ Pending push |
@@ -304,6 +305,14 @@ File: `src/Layouts/LayoutMenuData.tsx`
 ---
 
 ## Work Log
+
+### 2026-10-20/21 — Session 5 (`95905be75`, `aa89d4c60`, `bca3995df`)
+- **Card vs bank balance direction** — A card's `balance` is debt, so it moves opposite to a bank: spending raises it, payments/refunds lower it. Most screens treated cards like banks (e.g. a Transfer *to* the HBL card raised its outstanding instead of lowering it). Now centralised in `src/lib/balances.ts` → `balanceAfter(balance, type, 'out' | 'in', amount)`, used by Transactions (create + delete, incl. transfer/ATM), Splits settlements, Loans, Recurring confirm and Goals. Any new code that changes a balance should use it.
+- **Card EMIs** — paying an EMI from a card no longer changes the card balance (the plan is already blocked in limit − available), consistent with the Dashboard's liability math.
+- **Card payments** — can't be deleted from Transactions any more (the bill, both balances and `total_paid` would drift); remove them on the Credit Cards page. Removing one there now deletes only its own `credit_card_payment` transaction, not every same-amount one.
+- **Recurring from Transactions** — the `recurring_rules` insert was nested inside the split block, so rules only saved for split transactions. Fixed; failures now surface; toggle limited to income/expense. Earlier lost rules must be re-added by hand. *Not yet tested live.*
+- **Available limit** — Credit Cards bill card shows Available Limit; every account dropdown (`accountOptionLabel()`) shows cards as `Available: limit − outstanding`.
+- **Data fix** — HBL card outstanding was corrected by hand after the bug; don't delete pre-fix card transactions (the now-correct reversal would skew it).
 
 ### 2026-08-08 — Session 4 (requires manual SQL: `scripts/add-loan-split-person.sql`)
 - **Loans ↔ Splits rollup** — A loan can now be attached to a Splits contact so both debts settle as one figure, instead of the loan being added by hand at settlement time.
