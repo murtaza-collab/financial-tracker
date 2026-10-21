@@ -415,7 +415,9 @@ const Splits = () => {
         throw new Error('Amount via account must be more than 0 and not more than the total settled');
       }
       const offAccount = amount - viaAccount;
-      const acc = accounts.find(a => a.id === settleAccount);
+      // Fresh balance at submit time — page state may be stale
+      const { data: acc } = noAccount ? { data: null } : await supabase
+        .from('accounts').select('balance, type').eq('id', settleAccount).single();
       const { toLoans, splitPortion } = allocateSettlement(
         selectedPerson.id, settleDirection, amount, applyToLoans,
       );

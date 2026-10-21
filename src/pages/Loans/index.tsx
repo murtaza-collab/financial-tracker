@@ -127,9 +127,12 @@ useEffect(() => {
       setError('');
       try {
         const amount = Number(values.principal);
-        const acc = accounts.find(a => a.id === values.account_id);
 
         if (!alreadyInBalance) {
+          // Fresh balance at submit time — page state may be stale
+          const { data: acc } = await supabase
+            .from('accounts').select('balance, type').eq('id', values.account_id).single();
+
           // Create transaction and adjust balance only for new money movement
           await supabase.from('transactions').insert({
             user_id: user?.id,

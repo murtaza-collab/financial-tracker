@@ -293,7 +293,7 @@ File: `src/Layouts/LayoutMenuData.tsx`
 
 | Date | Item | Status |
 |------|------|--------|
-| 2026-10-21 | Loans + Splits compute the new account balance from page-load state, not a fresh fetch — can overwrite a balance changed in another tab | ⚠️ Open |
+| 2026-10-21 | Loans + Splits computed the new account balance from page-load state — now fetch the balance fresh at submit | ✅ Fixed |
 | 2026-07-23 | No SMTP configured — forgot-password disabled; set up Resend/Brevo before launch, then un-hide the link | ⚠️ Open |
 | 2026-07-23 | Supabase Site URL + Google redirect URIs point at `localhost:3000` — switch to real domain at launch | ⚠️ Open |
 | 2026-07-23 | 4 commits local, not yet pushed | ⚠️ Pending push |
